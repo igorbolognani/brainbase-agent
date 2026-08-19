@@ -1,6 +1,6 @@
 /**
  * @gptrouter/security
- * 
+ *
  * Security abstractions: SSRF protection, credential management interfaces
  */
 

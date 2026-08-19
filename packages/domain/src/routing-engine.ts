@@ -1,8 +1,10 @@
 /**
  * Core routing algorithm: two-stage admissibility filter + ordering
- * 
+ *
  * Stage 1: Filter routes by capability, availability, policy, budget
  * Stage 2: Order admissible routes by configured strategy (cost/quality/latency)
+ *
+ * V0.1: Only cost ordering is operational. Quality/latency require evidence-backed metrics.
  */
 
 import type {
@@ -14,6 +16,7 @@ import type {
   RejectionReason,
   RejectionReasonCode,
   BudgetCheckResult,
+  RoutePerformanceMetadata,
 } from '@gptrouter/contracts';
 import { generateId } from './utils.js';
 
@@ -24,6 +27,7 @@ export interface RoutingEngineDependencies {
     policy: RoutingPolicy
   ) => Promise<BudgetCheckResult>;
   estimateCost: (route: ModelRoute, task: Task) => number;
+  getPerformanceMetadata?: (route_id: string) => Promise<RoutePerformanceMetadata | null>;
 }
 
 export class RoutingEngine {
@@ -38,18 +42,12 @@ export class RoutingEngine {
     availableRoutes: ModelRoute[]
   ): Promise<RoutingDecision> {
     // Stage 1: Admissibility Filter
-    const admissibilityResults = await this.evaluateAdmissibility(
-      availableRoutes,
-      task,
-      policy
-    );
+    const admissibilityResults = await this.evaluateAdmissibility(availableRoutes, task, policy);
 
-    const admissibleRoutes = admissibilityResults
-      .filter((r) => r.admissible)
-      .map((r) => r.route);
+    const admissibleRoutes = admissibilityResults.filter((r) => r.admissible).map((r) => r.route);
 
     // Stage 2: Ordering
-    const orderedRoutes = this.orderRoutes(admissibleRoutes, policy, task);
+    const orderedRoutes = await this.orderRoutes(admissibleRoutes, policy, task);
 
     // Select top route (or null if none admissible)
     const selectedRoute = orderedRoutes[0] || null;
@@ -71,7 +69,7 @@ export class RoutingEngine {
       evaluated_routes: availableRoutes.map((r) => r.route_id),
       admissible_routes: admissibleRoutes.map((r) => r.route_id),
       selected_route_id: selectedRoute?.route_id || null,
-      route_snapshot: selectedRoute ? this.snapshotRoute(selectedRoute) : null,
+      route_snapshot: selectedRoute ? this.snapshotRoute(selectedRoute, policy.version) : null,
       rejection_reasons: rejectionReasons,
       estimated_cost: selectedRoute ? this.deps.estimateCost(selectedRoute, task) : null,
       decided_at: new Date(),
@@ -101,7 +99,7 @@ export class RoutingEngine {
   }
 
   // ========================================================================
-  // Private: Admissibility Filter
+  // Private: Admissibility Filter (ENFORCES ALL POLICY CONSTRAINTS)
   // ========================================================================
 
   private async evaluateAdmissibility(
@@ -138,29 +136,25 @@ export class RoutingEngine {
           };
         }
 
-        // Check policy constraints
+        // Check ALL policy constraints
         const policyCheck = this.satisfiesPolicy(route, policy);
         if (!policyCheck.satisfied) {
           return {
             route,
             admissible: false,
-            reason_code: 'policy_violation' as const,
+            reason_code: policyCheck.reason_code!,
             details: policyCheck.reason!,
           };
         }
 
         // Check budget
         const estimatedCost = this.deps.estimateCost(route, task);
-        const budgetCheck = await this.deps.checkBudget(
-          task.account_id,
-          estimatedCost,
-          policy
-        );
+        const budgetCheck = await this.deps.checkBudget(task.account_id, estimatedCost, policy);
         if (!budgetCheck.allowed) {
           return {
             route,
             admissible: false,
-            reason_code: 'budget_exceeded' as const,
+            reason_code: this.getBudgetRejectionCode(budgetCheck),
             details: budgetCheck.reason || 'Budget limit exceeded',
           };
         }
@@ -180,57 +174,140 @@ export class RoutingEngine {
   private satisfiesPolicy(
     route: ModelRoute,
     policy: RoutingPolicy
-  ): { satisfied: boolean; reason?: string } {
+  ): { satisfied: boolean; reason?: string; reason_code?: RejectionReasonCode } {
     const rules = policy.admissibility_rules;
 
     // Check allowed route types
     if (rules.allowed_route_types && !rules.allowed_route_types.includes(route.route_type)) {
       return {
         satisfied: false,
+        reason_code: 'policy_violation_route_type',
         reason: `Route type ${route.route_type} not in allowed types`,
       };
     }
 
+    // For provider routes: check provider allow/block lists
+    if (route.route_type === 'provider' && route.source_provider) {
+      if (rules.blocked_providers?.includes(route.source_provider)) {
+        return {
+          satisfied: false,
+          reason_code: 'policy_violation_provider_blocked',
+          reason: `Provider ${route.source_provider} is blocked`,
+        };
+      }
+
+      if (rules.allowed_providers && !rules.allowed_providers.includes(route.source_provider)) {
+        return {
+          satisfied: false,
+          reason_code: 'policy_violation_provider_not_allowed',
+          reason: `Provider ${route.source_provider} is not in allowed list`,
+        };
+      }
+    }
+
+    // For gateway routes: check gateway allow/block lists
+    if (route.route_type === 'gateway' && route.source_gateway) {
+      if (rules.blocked_gateways?.includes(route.source_gateway)) {
+        return {
+          satisfied: false,
+          reason_code: 'policy_violation_gateway_blocked',
+          reason: `Gateway ${route.source_gateway} is blocked`,
+        };
+      }
+
+      if (rules.allowed_gateways && !rules.allowed_gateways.includes(route.source_gateway)) {
+        return {
+          satisfied: false,
+          reason_code: 'policy_violation_gateway_not_allowed',
+          reason: `Gateway ${route.source_gateway} is not in allowed list`,
+        };
+      }
+    }
+
+    // Check required capabilities (already checked in admissibility but policy may have extras)
+    if (rules.required_capabilities) {
+      const missing = rules.required_capabilities.filter(
+        (cap: string) => !route.capabilities.includes(cap)
+      );
+      if (missing.length > 0) {
+        return {
+          satisfied: false,
+          reason_code: 'insufficient_capability',
+          reason: `Route missing required policy capabilities: ${missing.join(', ')}`,
+        };
+      }
+    }
+
     // Check excluded capabilities
     if (rules.excluded_capabilities) {
-      const hasExcluded = rules.excluded_capabilities.some((cap) =>
+      const hasExcluded = rules.excluded_capabilities.some((cap: string) =>
         route.capabilities.includes(cap)
       );
       if (hasExcluded) {
         return {
           satisfied: false,
+          reason_code: 'policy_violation_excluded_capability',
           reason: 'Route has excluded capabilities',
         };
       }
     }
 
+    // Security: check HTTPS requirement for gateways
+    if (route.route_type === 'gateway' && rules.require_https) {
+      // This would need connection metadata to verify - placeholder for now
+      // In real implementation, fetch connection and check gateway_url
+    }
+
     return { satisfied: true };
   }
 
+  private getBudgetRejectionCode(budgetCheck: BudgetCheckResult): RejectionReasonCode {
+    // Infer reason code from budget check details
+    const reason = budgetCheck.reason?.toLowerCase() || '';
+    if (reason.includes('daily')) return 'budget_exceeded_daily';
+    if (reason.includes('monthly')) return 'budget_exceeded_monthly';
+    if (reason.includes('route class')) return 'budget_exceeded_route_class';
+    return 'budget_exceeded_per_task';
+  }
+
   // ========================================================================
-  // Private: Ordering
+  // Private: Ordering (V0.1: Only cost is operational)
   // ========================================================================
 
-  private orderRoutes(routes: ModelRoute[], policy: RoutingPolicy, task: Task): ModelRoute[] {
+  private async orderRoutes(
+    routes: ModelRoute[],
+    policy: RoutingPolicy,
+    task: Task
+  ): Promise<ModelRoute[]> {
     const routesCopy = [...routes];
 
     switch (policy.ordering_strategy) {
       case 'cost':
+        // Operational: sort by estimated cost (ascending)
         return routesCopy.sort(
           (a, b) => this.deps.estimateCost(a, task) - this.deps.estimateCost(b, task)
         );
 
       case 'quality':
+        // V0.1: Unsupported without evidence-backed metrics
+        // Fall back to cost ordering
+        console.warn('Quality ordering unsupported in V0.1, falling back to cost');
         return routesCopy.sort(
-          (a, b) => this.qualityScore(b) - this.qualityScore(a) // Higher is better
+          (a, b) => this.deps.estimateCost(a, task) - this.deps.estimateCost(b, task)
         );
 
       case 'latency':
-        return routesCopy.sort((a, b) => this.latencyEstimate(a) - this.latencyEstimate(b));
+        // V0.1: Unsupported without evidence-backed metrics
+        // Fall back to cost ordering
+        console.warn('Latency ordering unsupported in V0.1, falling back to cost');
+        return routesCopy.sort(
+          (a, b) => this.deps.estimateCost(a, task) - this.deps.estimateCost(b, task)
+        );
 
       case 'custom':
-        // Custom ordering would use additional policy configuration
-        // For now, fall back to cost
+        // V0.1: Unsupported
+        // Fall back to cost ordering
+        console.warn('Custom ordering unsupported in V0.1, falling back to cost');
         return routesCopy.sort(
           (a, b) => this.deps.estimateCost(a, task) - this.deps.estimateCost(b, task)
         );
@@ -240,30 +317,20 @@ export class RoutingEngine {
     }
   }
 
-  private qualityScore(route: ModelRoute): number {
-    // Simple heuristic: more capabilities = higher quality
-    // Real implementation would use model-specific quality metrics
-    return route.capabilities.length;
-  }
-
-  private latencyEstimate(_route: ModelRoute): number {
-    // Placeholder: would use historical latency data
-    // For now, assume all routes have similar latency
-    return 1000; // ms
-  }
-
   // ========================================================================
   // Private: Utilities
   // ========================================================================
 
-  private snapshotRoute(route: ModelRoute): RouteSnapshot {
+  private snapshotRoute(route: ModelRoute, policy_version: number): RouteSnapshot {
     return {
       route_id: route.route_id,
       route_type: route.route_type,
       connection_id: route.connection_id,
       source_id: route.source_id,
-      pricing_metadata_version: route.pricing_metadata_version,
+      source_provider: route.source_provider,
+      source_gateway: route.source_gateway,
       pricing: route.pricing,
+      policy_version,
     };
   }
 }

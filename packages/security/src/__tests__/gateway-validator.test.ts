@@ -32,11 +32,7 @@ describe('GatewayValidator', () => {
     });
 
     it('should reject private IP ranges', async () => {
-      const testCases = [
-        'https://10.0.0.1',
-        'https://172.16.0.1',
-        'https://192.168.1.1',
-      ];
+      const testCases = ['https://10.0.0.1', 'https://172.16.0.1', 'https://192.168.1.1'];
 
       for (const url of testCases) {
         const result = await validator.validate(url);

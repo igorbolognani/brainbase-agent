@@ -5,9 +5,11 @@
 ### Connection Management
 
 #### initiate_provider_connection
+
 Initiates OAuth/OIDC flow for a provider connection.
 
 **Input**:
+
 ```typescript
 {
   provider: 'openai' | 'anthropic' | 'google' | 'cohere' | 'mistral';
@@ -15,27 +17,31 @@ Initiates OAuth/OIDC flow for a provider connection.
 ```
 
 **Output**:
+
 ```typescript
 {
-  oauth_url: string;  // URL for user to complete OAuth
-  state: string;      // CSRF protection state parameter
+  oauth_url: string; // URL for user to complete OAuth
+  state: string; // CSRF protection state parameter
 }
 ```
 
 **Security**: No credentials in request or response. OAuth URL includes state parameter for CSRF protection.
 
 #### initiate_gateway_connection
+
 Initiates connection to an external gateway.
 
 **Input**:
+
 ```typescript
 {
-  gateway_url: string;  // HTTPS only, will be validated
+  gateway_url: string; // HTTPS only, will be validated
   gateway_type: 'openrouter' | '9router' | 'openai_compatible';
 }
 ```
 
 **Output**:
+
 ```typescript
 {
   validation_result: {
@@ -49,19 +55,21 @@ Initiates connection to an external gateway.
 **Security**: URL validated for SSRF before returning. Actual API key captured through separate secure flow.
 
 #### list_connections
+
 Lists all active connections for the authenticated account.
 
 **Input**: (none)
 
 **Output**:
+
 ```typescript
 {
   connections: Array<{
     connection_id: string;
     type: 'provider' | 'gateway';
-    provider?: string;           // for provider connections
-    gateway_url?: string;        // for gateway connections
-    gateway_type?: string;       // for gateway connections
+    provider?: string; // for provider connections
+    gateway_url?: string; // for gateway connections
+    gateway_type?: string; // for gateway connections
     status: 'active' | 'error';
     created_at: string;
   }>;
@@ -71,9 +79,11 @@ Lists all active connections for the authenticated account.
 **Security**: Only returns opaque connection IDs and status. No credentials.
 
 #### revoke_connection
+
 Revokes a connection and wipes credentials.
 
 **Input**:
+
 ```typescript
 {
   connection_id: string;
@@ -81,6 +91,7 @@ Revokes a connection and wipes credentials.
 ```
 
 **Output**:
+
 ```typescript
 {
   success: boolean;
@@ -92,9 +103,11 @@ Revokes a connection and wipes credentials.
 ### Routing
 
 #### route_task
+
 Plans a route for a task WITHOUT executing it (no money spent).
 
 **Input**:
+
 ```typescript
 {
   description: string;
@@ -107,6 +120,7 @@ Plans a route for a task WITHOUT executing it (no money spent).
 ```
 
 **Output**:
+
 ```typescript
 {
   decision_id: string;
@@ -130,9 +144,11 @@ Plans a route for a task WITHOUT executing it (no money spent).
 **Guarantees**: No execution, no cost. Safe to call repeatedly.
 
 #### run_task
+
 Executes a task with the selected route (consequential, spends money).
 
 **Input**:
+
 ```typescript
 {
   task_id: string;
@@ -143,6 +159,7 @@ Executes a task with the selected route (consequential, spends money).
 ```
 
 **Output**:
+
 ```typescript
 {
   attempt_id: string;
@@ -158,9 +175,11 @@ Executes a task with the selected route (consequential, spends money).
 **Idempotency**: Same idempotency_key returns existing attempt. No double-execution.
 
 #### get_execution_status
+
 Retrieves current status of a task execution.
 
 **Input**:
+
 ```typescript
 {
   attempt_id: string;
@@ -168,6 +187,7 @@ Retrieves current status of a task execution.
 ```
 
 **Output**:
+
 ```typescript
 {
   attempt_id: string;
@@ -180,9 +200,11 @@ Retrieves current status of a task execution.
 ```
 
 #### cancel_execution
+
 Requests cancellation of a running task (best-effort).
 
 **Input**:
+
 ```typescript
 {
   attempt_id: string;
@@ -190,12 +212,13 @@ Requests cancellation of a running task (best-effort).
 ```
 
 **Output**:
+
 ```typescript
 {
   attempt_id: string;
   cancel_requested_at: string;
   status: 'cancel_requested' | 'cancelled' | 'completed';
-  note: string;  // Explains cancellation semantics
+  note: string; // Explains cancellation semantics
 }
 ```
 
@@ -204,9 +227,11 @@ Requests cancellation of a running task (best-effort).
 ### Model Catalog
 
 #### list_models
+
 Lists available models with capabilities and pricing.
 
 **Input**:
+
 ```typescript
 {
   filter?: {
@@ -217,6 +242,7 @@ Lists available models with capabilities and pricing.
 ```
 
 **Output**:
+
 ```typescript
 {
   models: Array<{
@@ -228,7 +254,7 @@ Lists available models with capabilities and pricing.
       metadata_version: string;
     };
     availability: 'available' | 'unavailable' | 'degraded';
-    routes_available: number;  // How many routes to this model
+    routes_available: number; // How many routes to this model
   }>;
   metadata_version: string;
   refreshed_at: string;
@@ -240,9 +266,11 @@ Lists available models with capabilities and pricing.
 ### Budget & Usage
 
 #### get_budget_status
+
 Retrieves current budget status and spending.
 
 **Input**:
+
 ```typescript
 {
   period?: 'daily' | 'monthly';
@@ -250,6 +278,7 @@ Retrieves current budget status and spending.
 ```
 
 **Output**:
+
 ```typescript
 {
   period: 'daily' | 'monthly';
@@ -262,9 +291,11 @@ Retrieves current budget status and spending.
 ```
 
 #### update_budget_policy
+
 Updates budget constraints for the account.
 
 **Input**:
+
 ```typescript
 {
   policy_id: string;
@@ -279,10 +310,11 @@ Updates budget constraints for the account.
 ```
 
 **Output**:
+
 ```typescript
 {
   policy_id: string;
-  version: number;  // Incremented
+  version: number; // Incremented
   updated_at: string;
 }
 ```
@@ -290,9 +322,11 @@ Updates budget constraints for the account.
 ### Audit
 
 #### get_audit_log
+
 Retrieves audit events for the account.
 
 **Input**:
+
 ```typescript
 {
   event_type?: string;
@@ -304,6 +338,7 @@ Retrieves audit events for the account.
 ```
 
 **Output**:
+
 ```typescript
 {
   events: Array<{
@@ -312,7 +347,7 @@ Retrieves audit events for the account.
     timestamp: string;
     resource_type?: string;
     resource_id?: string;
-    metadata: Record<string, unknown>;  // No credentials
+    metadata: Record<string, unknown>; // No credentials
   }>;
   total_count: number;
   has_more: boolean;
@@ -336,6 +371,7 @@ All tools return errors in consistent format:
 ```
 
 ### Error Codes
+
 - `invalid_input`: Malformed request
 - `authentication_failed`: Invalid or expired auth
 - `authorization_failed`: Insufficient permissions
@@ -356,7 +392,8 @@ type RouteType = 'provider' | 'gateway';
 type ConnectionStatus = 'active' | 'revoked' | 'expired' | 'error';
 type AvailabilityStatus = 'available' | 'unavailable' | 'degraded';
 type TaskStatus = 'planning' | 'approved' | 'executing' | 'completed' | 'failed' | 'cancelled';
-type ExecutionStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancel_requested' | 'cancelled';
+type ExecutionStatus =
+  'pending' | 'running' | 'completed' | 'failed' | 'cancel_requested' | 'cancelled';
 type OrderingStrategy = 'cost' | 'quality' | 'latency' | 'custom';
 
 type RejectionReasonCode =

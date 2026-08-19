@@ -1,14 +1,10 @@
 /**
  * Budget enforcement service
- * 
+ *
  * Server-side validation of budget constraints before execution.
  */
 
-import type {
-  RoutingPolicy,
-  BudgetCheckResult,
-  UsageRepository,
-} from '@gptrouter/contracts';
+import type { RoutingPolicy, BudgetCheckResult, UsageRepository } from '@gptrouter/contracts';
 
 export class BudgetEnforcer {
   constructor(private usageRepository: UsageRepository) {}

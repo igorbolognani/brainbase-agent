@@ -1,6 +1,6 @@
 /**
  * @gptrouter/domain
- * 
+ *
  * Core business logic and routing algorithms.
  */
 

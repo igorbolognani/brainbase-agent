@@ -16,6 +16,7 @@ Account 1---* AuditEvent
 ## Schema Definitions
 
 ### accounts
+
 ```sql
 CREATE TABLE accounts (
   account_id UUID PRIMARY KEY,
@@ -27,6 +28,7 @@ CREATE TABLE accounts (
 ```
 
 ### connections
+
 ```sql
 CREATE TABLE connections (
   connection_id UUID PRIMARY KEY,
@@ -48,6 +50,7 @@ CREATE INDEX idx_connections_account ON connections(account_id);
 ```
 
 ### model_routes
+
 ```sql
 CREATE TABLE model_routes (
   route_id UUID PRIMARY KEY,
@@ -66,6 +69,7 @@ CREATE INDEX idx_routes_source ON model_routes(source_id);
 ```
 
 ### routing_policies
+
 ```sql
 CREATE TABLE routing_policies (
   policy_id UUID PRIMARY KEY,
@@ -83,6 +87,7 @@ CREATE INDEX idx_policies_account ON routing_policies(account_id);
 ```
 
 ### tasks
+
 ```sql
 CREATE TABLE tasks (
   task_id UUID PRIMARY KEY,
@@ -98,6 +103,7 @@ CREATE INDEX idx_tasks_status ON tasks(status);
 ```
 
 ### routing_decisions
+
 ```sql
 CREATE TABLE routing_decisions (
   decision_id UUID PRIMARY KEY,
@@ -116,6 +122,7 @@ CREATE INDEX idx_decisions_task ON routing_decisions(task_id);
 ```
 
 ### execution_attempts
+
 ```sql
 CREATE TABLE execution_attempts (
   attempt_id UUID PRIMARY KEY,
@@ -137,6 +144,7 @@ CREATE INDEX idx_attempts_idempotency ON execution_attempts(idempotency_key);
 ```
 
 ### usage_records
+
 ```sql
 CREATE TABLE usage_records (
   usage_id UUID PRIMARY KEY,
@@ -152,6 +160,7 @@ CREATE INDEX idx_usage_attempt ON usage_records(attempt_id);
 ```
 
 ### audit_events
+
 ```sql
 CREATE TABLE audit_events (
   event_id UUID PRIMARY KEY,
@@ -171,22 +180,26 @@ CREATE INDEX idx_audit_timestamp ON audit_events(timestamp);
 ## Data Integrity Constraints
 
 ### Referential Integrity
+
 - All foreign keys enforced with CASCADE or RESTRICT as appropriate
 - Deleting an account cascades to connections, policies, tasks, audit events
 - Deleting a connection cascades to routes
 - Deleting a task cascades to decisions and attempts
 
 ### Immutability
+
 - `routing_decisions`: Never UPDATE, only INSERT
 - `audit_events`: Append-only, never UPDATE or DELETE (retention policy only)
 - `usage_records`: Never UPDATE after initial INSERT
 
 ### Validation
+
 - `connections.gateway_url`: HTTPS validated at application layer before INSERT/UPDATE
 - `connections.credential_reference`: Never directly queried by client
 - All ENUM-like fields enforced with CHECK constraints
 
 ### Tenant Isolation
+
 - Row-level security policies ensure account_id filtering
 - All queries scoped to authenticated account
 - Cross-account joins forbidden
@@ -194,6 +207,7 @@ CREATE INDEX idx_audit_timestamp ON audit_events(timestamp);
 ## Indexing Strategy
 
 ### High-Volume Query Patterns
+
 1. List routes for account (via connections)
 2. Get task history for account
 3. Audit log queries (by account, type, time range)
@@ -201,6 +215,7 @@ CREATE INDEX idx_audit_timestamp ON audit_events(timestamp);
 5. Budget calculations (sum usage by account + time window)
 
 ### Composite Indexes (if needed based on query analysis)
+
 ```sql
 CREATE INDEX idx_tasks_account_status ON tasks(account_id, status);
 CREATE INDEX idx_audit_account_timestamp ON audit_events(account_id, timestamp DESC);
@@ -209,15 +224,18 @@ CREATE INDEX idx_audit_account_timestamp ON audit_events(account_id, timestamp D
 ## Retention and Archival
 
 ### Audit Events
+
 - Retain 90 days online
 - Archive to cold storage after 90 days
 - Legal hold capability for compliance
 
 ### Usage Records
+
 - Retain indefinitely for billing reconciliation
 - Summarize to daily aggregates after 12 months
 
 ### Execution Attempts
+
 - Retain completed attempts 30 days
 - Archive to cold storage after 30 days
 - Keep metadata, archive detailed logs separately

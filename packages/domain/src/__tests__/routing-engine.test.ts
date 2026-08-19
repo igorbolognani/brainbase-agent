@@ -5,11 +5,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { RoutingEngine } from '../routing-engine.js';
-import type {
-  Task,
-  ModelRoute,
-  RoutingPolicy,
-} from '@gptrouter/contracts';
+import type { Task, ModelRoute, RoutingPolicy } from '@gptrouter/contracts';
 
 // ============================================================================
 // Synthetic Fixtures
@@ -37,13 +33,17 @@ function createTestRoute(
     route_type: 'provider',
     connection_id: 'test-connection-1',
     source_id: `test-model-${id}`,
+    source_provider: 'test-provider',
     capabilities,
-    pricing_metadata_version: '1.0.0',
     pricing: {
       input_cost_per_1k_tokens: cost,
       output_cost_per_1k_tokens: cost * 2,
-      metadata_version: '1.0.0',
+      currency: 'USD',
+      units: 'per_1k_tokens',
+      source: 'test-fixture',
       effective_at: new Date(),
+      refreshed_at: new Date(),
+      version: '1.0.0',
     },
     availability_status: available ? 'available' : 'unavailable',
     created_at: new Date(),
@@ -131,9 +131,9 @@ describe('RoutingEngine', () => {
 
       expect(decision.selected_route_id).toBe('route-1');
       expect(decision.admissible_routes).toEqual(['route-1']);
-      expect(decision.rejection_reasons.find((r) => r.route_id === 'route-2')?.reason_code).toBe(
-        'budget_exceeded'
-      );
+      expect(
+        decision.rejection_reasons.find((r: any) => r.route_id === 'route-2')?.reason_code
+      ).toBe('budget_exceeded_per_task');
     });
 
     it('should respect policy route type restrictions', async () => {
@@ -155,9 +155,9 @@ describe('RoutingEngine', () => {
 
       expect(decision.selected_route_id).toBe('route-1');
       expect(decision.admissible_routes).toEqual(['route-1']);
-      expect(decision.rejection_reasons.find((r) => r.route_id === 'route-2')?.reason_code).toBe(
-        'policy_violation'
-      );
+      expect(
+        decision.rejection_reasons.find((r: any) => r.route_id === 'route-2')?.reason_code
+      ).toBe('policy_violation_route_type');
     });
   });
 
@@ -182,7 +182,7 @@ describe('RoutingEngine', () => {
       expect(decision.estimated_cost).toBe(0.001);
     });
 
-    it('should order by quality (more capabilities = higher quality)', async () => {
+    it('should fall back to cost when quality ordering is unsupported', async () => {
       const engine = new RoutingEngine({
         checkBudget: async () => ({ allowed: true }),
         estimateCost: (route) => route.pricing.input_cost_per_1k_tokens,
@@ -197,7 +197,8 @@ describe('RoutingEngine', () => {
 
       const decision = await engine.planRoute(task, policy, routes);
 
-      expect(decision.selected_route_id).toBe('route-advanced');
+      // V0.1: Quality ordering falls back to cost, so selects cheaper route
+      expect(decision.selected_route_id).toBe('route-basic');
     });
   });
 
@@ -220,7 +221,7 @@ describe('RoutingEngine', () => {
       expect(decision.policy_version).toBe(policy.version);
       expect(decision.evaluated_routes).toEqual(['route-1']);
       expect(decision.route_snapshot).toBeDefined();
-      expect(decision.route_snapshot?.pricing_metadata_version).toBe('1.0.0');
+      expect(decision.route_snapshot?.pricing.version).toBe('1.0.0');
       expect(decision.decided_at).toBeInstanceOf(Date);
     });
 
@@ -241,7 +242,7 @@ describe('RoutingEngine', () => {
       expect(snapshot.route_type).toBe(route.route_type);
       expect(snapshot.connection_id).toBe(route.connection_id);
       expect(snapshot.source_id).toBe(route.source_id);
-      expect(snapshot.pricing_metadata_version).toBe(route.pricing_metadata_version);
+      expect(snapshot.policy_version).toBe(policy.version);
       expect(snapshot.pricing).toEqual(route.pricing);
     });
   });

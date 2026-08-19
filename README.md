@@ -9,6 +9,7 @@ GPTRouter is a unified OpenAI Apps SDK application that routes AI tasks to the m
 GPTRouter is **one unified application** built with OpenAI Apps SDK + MCP, providing a single UI inside ChatGPT. It is not multiple separate products.
 
 ### Core Principle
+
 **Lowest-cost adequate capability**: Start with the most cost-effective model that can handle the task. Escalate only when evidence warrants it.
 
 ### Product Architecture

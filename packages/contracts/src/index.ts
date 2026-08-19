@@ -1,6 +1,6 @@
 /**
  * @gptrouter/contracts
- * 
+ *
  * Core type definitions and contracts for GPTRouter.
  * No implementation, only types.
  */
