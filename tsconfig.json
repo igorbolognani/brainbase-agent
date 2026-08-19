@@ -1,9 +1,9 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "module": "ESNext",
+    "module": "Node16",
     "lib": ["ES2022"],
-    "moduleResolution": "bundler",
+    "moduleResolution": "Node16",
     "resolveJsonModule": true,
     "allowJs": false,
     "strict": true,
@@ -18,7 +18,12 @@
     "declarationMap": true,
     "sourceMap": true,
     "composite": true,
-    "incremental": true
+    "incremental": true,
+    "paths": {
+      "@gptrouter/contracts": ["./packages/contracts/src/index.ts"],
+      "@gptrouter/domain": ["./packages/domain/src/index.ts"],
+      "@gptrouter/security": ["./packages/security/src/index.ts"]
+    }
   },
   "exclude": ["node_modules", "dist", "build"]
 }

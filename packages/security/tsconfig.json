@@ -2,7 +2,14 @@
   "extends": "../../tsconfig.json",
   "compilerOptions": {
     "outDir": "./dist",
-    "rootDir": "./src"
+    "rootDir": "./src",
+    "composite": true,
+    "declaration": true,
+    "declarationMap": true,
+    "baseUrl": ".",
+    "paths": {
+      "@gptrouter/contracts": ["../contracts/src/index.ts"]
+    }
   },
   "include": ["src/**/*"],
   "references": [{ "path": "../contracts" }]

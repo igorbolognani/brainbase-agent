@@ -5,7 +5,12 @@
     "rootDir": "./src",
     "composite": true,
     "declaration": true,
-    "declarationMap": true
+    "declarationMap": true,
+    "baseUrl": ".",
+    "paths": {
+      "@gptrouter/contracts": ["../contracts/src/index.ts"],
+      "@gptrouter/domain": ["../domain/src/index.ts"]
+    }
   },
   "include": ["src/**/*"],
   "references": [{ "path": "../contracts" }, { "path": "../domain" }]
