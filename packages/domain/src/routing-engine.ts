@@ -49,7 +49,13 @@ export class RoutingEngine {
     // Stage 2: Ordering
     const orderedRoutes = await this.orderRoutes(admissibleRoutes, policy, task);
 
-    // Select top route (or null if none admissible)
+    // Check if ordering strategy is unsupported (empty result despite admissible routes)
+    const orderingUnsupported =
+      admissibleRoutes.length > 0 &&
+      orderedRoutes.length === 0 &&
+      ['quality', 'latency', 'custom'].includes(policy.ordering_strategy);
+
+    // Select top route (or null if none admissible or strategy unsupported)
     const selectedRoute = orderedRoutes[0] || null;
 
     // Build rejection reasons for non-admissible routes
@@ -73,6 +79,7 @@ export class RoutingEngine {
       rejection_reasons: rejectionReasons,
       estimated_cost: selectedRoute ? this.deps.estimateCost(selectedRoute, task) : null,
       decided_at: new Date(),
+      ordering_strategy_unsupported: orderingUnsupported || undefined,
     };
   }
 
@@ -254,8 +261,14 @@ export class RoutingEngine {
 
     // Security: check HTTPS requirement for gateways
     if (route.route_type === 'gateway' && rules.require_https) {
-      // This would need connection metadata to verify - placeholder for now
-      // In real implementation, fetch connection and check gateway_url
+      // TODO: Implement actual HTTPS enforcement with gateway connection metadata
+      // V0.1: Fail closed - reject gateway routes when require_https is enabled
+      // until connection metadata integration is complete
+      return {
+        satisfied: false,
+        reason_code: 'policy_violation_security',
+        reason: 'HTTPS enforcement requires gateway connection metadata (not yet integrated)',
+      };
     }
 
     return { satisfied: true };
@@ -289,28 +302,12 @@ export class RoutingEngine {
         );
 
       case 'quality':
-        // V0.1: Unsupported without evidence-backed metrics
-        // Fall back to cost ordering
-        console.warn('Quality ordering unsupported in V0.1, falling back to cost');
-        return routesCopy.sort(
-          (a, b) => this.deps.estimateCost(a, task) - this.deps.estimateCost(b, task)
-        );
-
       case 'latency':
-        // V0.1: Unsupported without evidence-backed metrics
-        // Fall back to cost ordering
-        console.warn('Latency ordering unsupported in V0.1, falling back to cost');
-        return routesCopy.sort(
-          (a, b) => this.deps.estimateCost(a, task) - this.deps.estimateCost(b, task)
-        );
-
       case 'custom':
-        // V0.1: Unsupported
-        // Fall back to cost ordering
-        console.warn('Custom ordering unsupported in V0.1, falling back to cost');
-        return routesCopy.sort(
-          (a, b) => this.deps.estimateCost(a, task) - this.deps.estimateCost(b, task)
-        );
+        // V0.1: Unsupported strategies - fail closed
+        // Do NOT silently execute a different strategy
+        // Caller must handle empty result indicating unsupported strategy
+        return [];
 
       default:
         return routesCopy;

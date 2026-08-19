@@ -10,16 +10,21 @@
   "scripts": {
     "build": "tsc --build",
     "typecheck": "tsc --build --force",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "dev": "node --loader ts-node/esm src/index.ts",
     "start": "node dist/index.js"
   },
   "dependencies": {
     "@gptrouter/contracts": "0.1.0",
     "@gptrouter/domain": "0.1.0",
-    "@modelcontextprotocol/sdk": "^1.0.4"
+    "@modelcontextprotocol/node": "^2.0.0",
+    "@modelcontextprotocol/server": "^2.0.0",
+    "zod": "^4.2.0"
   },
   "devDependencies": {
     "@types/node": "^20.17.10",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "vitest": "^4.1.11"
   }
 }

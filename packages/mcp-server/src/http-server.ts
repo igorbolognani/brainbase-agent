@@ -1,24 +1,20 @@
 #!/usr/bin/env node
 /**
- * GPTRouter MCP Server (v2) - Stdio Entry Point
+ * GPTRouter MCP HTTP Server
  *
- * MCP server for ChatGPT Apps SDK / MCP Apps
- * Exposes safe, read-only routing tools for V0.1 vertical slice
- *
- * This entry point uses stdio transport for local development.
- * For remote HTTP access, use http-server.ts
- *
- * Tools:
- * - list_models: List available models/routes
- * - route_task: Plan a route (NO execution, NO spend)
- * - get_task: Retrieve task status
- * - get_usage: Get usage summary
- *
- * run_task is intentionally NOT exposed in V0.1 (no execution adapters yet)
+ * Remote Streamable HTTP endpoint for ChatGPT Apps SDK / MCP Apps
+ * Suitable for public remote access
  */
 
-import { McpServer } from '@modelcontextprotocol/server';
-import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
+import { createServer } from 'node:http';
+import { createMcpHandler, McpServer } from '@modelcontextprotocol/server';
+import {
+  toNodeHandler,
+  localhostHostValidation,
+  localhostOriginValidation,
+} from '@modelcontextprotocol/node';
+
+// Import shared tool logic
 import { ListModelsInput, RouteTaskInput, GetTaskInput, GetUsageInput } from './schemas.js';
 import {
   listModelsHandler,
@@ -28,10 +24,10 @@ import {
 } from './handlers.js';
 
 // ============================================================================
-// Server Factory
+// MCP Handler Factory (per-request instance)
 // ============================================================================
 
-function createGPTRouterServer() {
+const handler = createMcpHandler(() => {
   const server = new McpServer({
     name: 'gptrouter-mcp',
     version: '0.1.0',
@@ -78,25 +74,51 @@ function createGPTRouterServer() {
   );
 
   return server;
-}
+});
 
 // ============================================================================
-// Server Startup (Stdio Transport)
+// HTTP Server with DNS Rebinding Protection
 // ============================================================================
 
-async function main() {
-  const server = createGPTRouterServer();
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
+const nodeHandler = toNodeHandler(handler);
+const validateHost = localhostHostValidation();
+const validateOrigin = localhostOriginValidation();
 
-  console.error('GPTRouter MCP Server started (v2)');
+const server = createServer((req, res) => {
+  // Protect against DNS rebinding attacks
+  if (!validateHost(req, res) || !validateOrigin(req, res)) return;
+  void nodeHandler(req, res);
+});
+
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+const HOST = process.env.HOST || '127.0.0.1';
+
+server.listen(PORT, HOST, () => {
+  console.error(`GPTRouter MCP HTTP Server listening on http://${HOST}:${PORT}/mcp`);
   console.error('V0.1: Exposes safe, read-only routing tools');
   console.error('Available tools: list_models, route_task, get_task, get_usage');
-  console.error('Transport: stdio (for local development)');
-  console.error('For remote HTTP access, use: node dist/http-server.js');
-}
+  console.error('Protected: DNS rebinding guards active');
+});
 
-main().catch((error) => {
-  console.error('Fatal error:', error);
-  process.exit(1);
+// Graceful shutdown
+process.on('SIGINT', () => {
+  void (async () => {
+    console.error('Shutting down...');
+    await handler.close();
+    server.close(() => {
+      console.error('Server closed');
+      process.exit(0);
+    });
+  })();
+});
+
+process.on('SIGTERM', () => {
+  void (async () => {
+    console.error('Shutting down...');
+    await handler.close();
+    server.close(() => {
+      console.error('Server closed');
+      process.exit(0);
+    });
+  })();
 });

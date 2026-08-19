@@ -283,6 +283,11 @@ export interface RoutingDecision {
   rejection_reasons: RejectionReason[];
   estimated_cost: number | null;
   decided_at: Date;
+  /**
+   * Indicates if the requested ordering strategy is unsupported.
+   * When true, no route was selected even if admissible routes exist.
+   */
+  ordering_strategy_unsupported?: boolean;
 }
 
 export interface RetryPolicy {

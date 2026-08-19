@@ -197,8 +197,10 @@ describe('RoutingEngine', () => {
 
       const decision = await engine.planRoute(task, policy, routes);
 
-      // V0.1: Quality ordering falls back to cost, so selects cheaper route
-      expect(decision.selected_route_id).toBe('route-basic');
+      // V0.1: Quality ordering is unsupported - fails closed
+      expect(decision.selected_route_id).toBeNull();
+      expect(decision.ordering_strategy_unsupported).toBe(true);
+      expect(decision.admissible_routes).toHaveLength(2);
     });
   });
 
