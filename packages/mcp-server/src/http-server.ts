@@ -3,10 +3,10 @@
  * GPTRouter MCP HTTP Server (LOCAL DEVELOPMENT MODE)
  *
  * Streamable HTTP `/mcp` endpoint using MCP TypeScript SDK v2
- * 
+ *
  * CURRENT STATE: Local development mode with localhost-only binding and
  * DNS rebinding protection. NOT configured for public deployment.
- * 
+ *
  * TODO: Implement deployment mode with explicit trusted host/origin policy,
  * proper authentication/authorization boundary, and secure public binding.
  * See Phase 0B requirements.

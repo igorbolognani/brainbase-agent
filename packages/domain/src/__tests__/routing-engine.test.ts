@@ -182,7 +182,7 @@ describe('RoutingEngine', () => {
       expect(decision.estimated_cost).toBe(0.001);
     });
 
-    it('should fall back to cost when quality ordering is unsupported', async () => {
+    it('should fail closed when quality ordering is unsupported', async () => {
       const engine = new RoutingEngine({
         checkBudget: async () => ({ allowed: true }),
         estimateCost: (route) => route.pricing.input_cost_per_1k_tokens,
@@ -197,7 +197,7 @@ describe('RoutingEngine', () => {
 
       const decision = await engine.planRoute(task, policy, routes);
 
-      // V0.1: Quality ordering is unsupported - fails closed
+      // V0.1: Quality ordering is unsupported - fails closed, no route selected
       expect(decision.selected_route_id).toBeNull();
       expect(decision.ordering_strategy_unsupported).toBe(true);
       expect(decision.admissible_routes).toHaveLength(2);
