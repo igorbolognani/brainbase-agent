@@ -31,7 +31,6 @@ describe('RoutingEngine Fail-Closed Behavior', () => {
     },
     status: 'planning',
     created_at: new Date(),
-    updated_at: new Date(),
   };
 
   const mockRoute: ModelRoute = {
