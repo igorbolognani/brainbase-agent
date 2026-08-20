@@ -108,7 +108,8 @@ function ipv6Reason(bytes: number[]): string | null {
   const loopback = bytes.slice(0, 15).every((value) => value === 0) && bytes[15] === 1;
   if (loopback) return 'loopback';
 
-  const mapped = bytes.slice(0, 10).every((value) => value === 0) && bytes[10] === 0xff && bytes[11] === 0xff;
+  const mapped =
+    bytes.slice(0, 10).every((value) => value === 0) && bytes[10] === 0xff && bytes[11] === 0xff;
   if (mapped) return ipv4Reason(bytes.slice(12)) ?? null;
 
   if ((bytes[0] & 0xfe) === 0xfc) return 'unique_local';
