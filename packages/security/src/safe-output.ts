@@ -1,12 +1,7 @@
 import type { Connection, GatewayConnection, ProviderConnection } from '@gptrouter/contracts';
 
 export type PublicJson =
-  | null
-  | boolean
-  | number
-  | string
-  | PublicJson[]
-  | { [key: string]: PublicJson };
+  null | boolean | number | string | PublicJson[] | { [key: string]: PublicJson };
 
 export type SanitizationMode = 'drop' | 'redact';
 
