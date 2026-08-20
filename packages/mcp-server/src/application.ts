@@ -25,10 +25,15 @@ import type {
   VerificationOutcome,
 } from '@gptrouter/contracts';
 import {
+  AdapterExecutionCoordinatorBridge,
+  AdapterExecutionVerifier,
   BudgetEnforcer,
+  DefaultProviderAdapterRegistry,
   DeterministicVerifier,
   ExecutionCoordinator,
+  FakeProviderAdapter,
   generateId,
+  ProviderAdapterRegistry,
   RoutingEngine,
   SyntheticExecutor,
   type FallbackPlanner,
@@ -219,6 +224,8 @@ export interface SyntheticApplicationOptions {
   requireAuthorizedExecution?: boolean;
   audit_failure_mode?: boolean;
   clock?: () => Date;
+  provider_execution_enabled?: boolean;
+  adapterRegistry?: ProviderAdapterRegistry;
 }
 
 export interface GPTRouterApplication {
@@ -912,6 +919,22 @@ export function createSyntheticGPTRouterApplication(
       updated_at: new Date(),
     },
   };
+
+  // Build provider adapter registry for fake adapters
+  let executor: ExecutionExecutor = options.executor ?? new SyntheticExecutor();
+  let verifier: ExecutionVerifier = options.verifier ?? new DeterministicVerifier();
+
+  if (options.provider_execution_enabled) {
+    // Create fake adapter registry with default adapter for testing
+    const registry = new DefaultProviderAdapterRegistry();
+    const fakeAdapter = new FakeProviderAdapter({ provider: 'synthetic-provider' });
+    registry.registerAdapter('synthetic-provider-alpha', fakeAdapter);
+    registry.registerAdapter('synthetic-provider-beta', fakeAdapter);
+    registry.setDefaultAdapter(fakeAdapter);
+    executor = new AdapterExecutionCoordinatorBridge({ registry });
+    verifier = new AdapterExecutionVerifier();
+  }
+
   const executionCoordinator = new ExecutionCoordinator({
     repositories: {
       tasks: repositories.tasks,
@@ -922,8 +945,8 @@ export function createSyntheticGPTRouterApplication(
       audit: repositories.audit,
     } satisfies ExecutionCoordinatorRepositories,
     budgetEnforcer,
-    executor: options.executor ?? new SyntheticExecutor(),
-    verifier: options.verifier ?? new DeterministicVerifier(),
+    executor,
+    verifier,
     fallbackPlanner,
     onAuditFailure: () => {
       repositories.store.auditFailureCount += 1;
