@@ -1,30 +1,33 @@
 # Next Task
 
-## Phase 0E — Runtime Auth / Tenancy / Secret Boundaries
+## Phase 0C — Connection-Metadata-Aware HTTPS Routing
 
-Turn the existing Principal / AccountMembership / Account types into enforceable runtime service boundaries and ensure model-visible, MCP, log, and audit outputs cannot leak credentials or internal vault references.
+Replace the temporary blanket gateway rejection under `require_https` with a real admissibility check against the selected route's persisted connection metadata.
 
 ### Required
 
-- Keep app authentication separate from provider/gateway credentials.
-- Add a runtime authorization service that resolves a Principal to an active AccountMembership for the requested Account.
-- Deny missing, suspended, revoked, or cross-account membership.
-- Support role requirements without trusting client-supplied account ownership claims.
-- Add explicit safe projection/serialization helpers for model-visible/MCP/log/audit data.
-- Do not expose raw API keys, bearer tokens, passwords, secret values, Authorization/Cookie headers, or internal credential/vault paths.
-- Where a public response needs connection identity, expose opaque connection ID plus safe status/metadata only.
-- Keep the Phase 0B static bearer gate labeled as bootstrap transport protection; do not falsely present it as final user auth.
-- Preserve provider auth extensibility: OAuth and secure server-side secret setup are both valid provider connection methods.
+- Keep `route_task` planning-only and no-spend.
+- Resolve each gateway route's `connection_id` to a `GatewayConnection` owned by the same account as the task/policy context.
+- When `require_https` is enabled, accept a gateway route only when its resolved connection has a syntactically valid HTTPS `gateway_url` with no URL credentials.
+- Fail closed when gateway connection metadata is missing, inactive, mismatched by type, or belongs to another account.
+- Do not require gateway metadata for provider routes.
+- Keep provider/gateway allow/block policies unchanged.
+- Apply the exact same admissibility path to manual overrides; no bypass.
+- Do not duplicate endpoint metadata onto `ModelRoute`; `connection_id` remains the reference to connection-owned configuration.
+- Do not perform any outbound provider/gateway request as part of planning.
 
 ### Required tests
 
-- active same-account membership succeeds;
-- cross-account access denied;
-- suspended/revoked membership denied;
-- insufficient role denied;
-- hostile nested secret-like fixtures are redacted or rejected at each public projection boundary;
-- credential references/vault paths do not reach model-visible/MCP projections;
-- authorization failures do not leak whether a foreign account/resource exists.
+- HTTPS gateway accepted when `require_https` is enabled and same-account active metadata exists;
+- HTTP gateway rejected;
+- URL userinfo rejected;
+- missing connection rejected;
+- wrong connection type rejected;
+- revoked/expired/error connection rejected;
+- cross-account connection rejected;
+- provider route remains admissible without gateway metadata;
+- manual override follows the same HTTPS/connection checks;
+- planning never invokes an execution/outbound adapter.
 
 ### Do not implement yet
 
@@ -34,4 +37,4 @@ Turn the existing Principal / AccountMembership / Account types into enforceable
 
 ### Exit gate
 
-Full deterministic CI plus targeted authorization/secret-boundary tests must be green before Phase 0C routing/HTTPS completion.
+Full deterministic CI plus targeted connection-aware routing tests must be green before Phase 0F UI work.
