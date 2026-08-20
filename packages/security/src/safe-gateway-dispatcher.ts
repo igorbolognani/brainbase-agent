@@ -92,9 +92,7 @@ function normalizeResponseHeaders(
   return normalized;
 }
 
-async function defaultTransport(
-  request: PinnedTransportRequest
-): Promise<PinnedTransportResponse> {
+async function defaultTransport(request: PinnedTransportRequest): Promise<PinnedTransportResponse> {
   return await new Promise((resolve, reject) => {
     const req = httpsRequest(
       request.url,
@@ -114,7 +112,9 @@ async function defaultTransport(
         res.on('data', (chunk: Buffer) => {
           total += chunk.length;
           if (total > request.maxResponseBytes) {
-            req.destroy(new GatewayDispatchError('response_too_large', 'Gateway response exceeded limit'));
+            req.destroy(
+              new GatewayDispatchError('response_too_large', 'Gateway response exceeded limit')
+            );
             return;
           }
           chunks.push(chunk);
@@ -181,7 +181,10 @@ export class SafeGatewayDispatcher {
     for (const address of addresses) {
       const classification = classifyIpAddress(address);
       if (!classification.safe) {
-        throw new GatewayDispatchError('unsafe_address', 'Gateway resolved to a disallowed network address');
+        throw new GatewayDispatchError(
+          'unsafe_address',
+          'Gateway resolved to a disallowed network address'
+        );
       }
     }
 
@@ -199,7 +202,10 @@ export class SafeGatewayDispatcher {
     });
 
     try {
-      return await Promise.race([this.dispatchWithSignal(input, controller.signal), timeoutPromise]);
+      return await Promise.race([
+        this.dispatchWithSignal(input, controller.signal),
+        timeoutPromise,
+      ]);
     } finally {
       if (timeoutHandle) clearTimeout(timeoutHandle);
     }
