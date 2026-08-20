@@ -7,6 +7,10 @@ import {
 } from '@modelcontextprotocol/node';
 import { createGPTRouterMcpServer } from './mcp-server-factory.js';
 import {
+  createSyntheticGPTRouterApplication,
+  type GPTRouterApplication,
+} from './application.js';
+import {
   applyRemoteNetworkBoundary,
   applyRemoteRequestBoundary,
   type HttpServerConfig,
@@ -18,6 +22,7 @@ import {
 
 export interface GPTRouterHttpRuntime {
   server: Server;
+  application: GPTRouterApplication;
   close(): Promise<void>;
 }
 
@@ -28,13 +33,20 @@ export interface GPTRouterHttpRuntimeOptions {
    * boundary for deployment bring-up only.
    */
   oauth?: OAuthResourceServerOptions;
+  /**
+   * Runtime-scoped authoritative application state. Tests may inject a fresh
+   * instance; production adapters can later inject durable repositories.
+   */
+  application?: GPTRouterApplication;
 }
 
 /**
  * Create the Node HTTP adapter without binding a port.
  *
- * Tests can bind to port 0 and exercise the real Streamable HTTP path while
- * production startup remains a tiny CLI wrapper.
+ * The application is created once per HTTP runtime and injected into every MCP
+ * protocol-server instance created by the Streamable HTTP handler. This makes
+ * route_task → get_task persistence real across separate HTTP requests without
+ * coupling persistence to one MCP transport object.
  */
 export function createGPTRouterHttpRuntime(
   config: HttpServerConfig,
@@ -44,7 +56,8 @@ export function createGPTRouterHttpRuntime(
     throw new Error('OAuth resource-server mode is only valid for remote HTTP mode');
   }
 
-  const handler = createMcpHandler(() => createGPTRouterMcpServer());
+  const application = options.application ?? createSyntheticGPTRouterApplication();
+  const handler = createMcpHandler(() => createGPTRouterMcpServer({ application }));
   const servedHandler = options.oauth
     ? createOAuthProtectedMcpHandler(handler, options.oauth)
     : handler;
@@ -63,6 +76,8 @@ export function createGPTRouterHttpRuntime(
           status: 'ok',
           mode: config.mode,
           authentication: options.oauth ? 'oauth_resource_server' : 'bootstrap_bearer',
+          data_mode: 'synthetic_repository',
+          provider_execution: 'disabled',
         })
       );
       return;
@@ -89,6 +104,7 @@ export function createGPTRouterHttpRuntime(
 
   return {
     server,
+    application,
     async close(): Promise<void> {
       await handler.close();
       await new Promise<void>((resolve, reject) => {
