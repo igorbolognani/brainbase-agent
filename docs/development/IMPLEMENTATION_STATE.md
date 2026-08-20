@@ -20,12 +20,21 @@ Original verified baseline for this sequence: `20ea09a734269aa630650180831fc8c2b
   - `openai/outputTemplate` retained only as a compatibility alias;
   - stable MCP Apps `2026-01-26` view handshake with `appInfo`, `appCapabilities`, and `ui/notifications/initialized`;
   - complete 11-section GPTRouter navigation shell;
-  - functional-shell priority for Overview, Router, Tasks, Engineering, Providers & Connections, and Model Gateways / Proxies;
-  - remaining sections explicitly labeled placeholders;
+  - functional-shell priority for Overview, Router, Tasks, Engineering, Models, Providers & Connections, Model Gateways / Proxies, and Usage & Budgets;
+  - Security & Permissions, Activity / Audit, and Settings remain placeholders;
   - structured and visible synthetic/no-spend state;
   - no external UI assets;
   - no `run_task`, provider execution, or paid calls.
-- Current full CI test inventory: 140 unique tests (contracts 6, domain 33, MCP server 36, security 65).
+- Phase 0G synthetic repository-backed vertical slice is implemented and CI-verified:
+  - single authoritative `GPTRouterApplication` over in-memory synthetic repositories;
+  - `list_models`, `route_task`, `get_task`, `get_usage`, and dashboard all read from the same shared application state;
+  - `route_task` invokes the real `RoutingEngine` and persists planned tasks and routing decisions;
+  - `get_task` in a separate MCP request retrieves the previous plan;
+  - estimated/planned cost is tracked separately from actual cost; actual provider spend is zero;
+  - no `run_task`, no execution adapters, no outbound provider/gateway dispatch, no paid calls;
+  - secret-like values do not appear in public tool outputs;
+  - workspace test resolution maps `@gptrouter/*` packages to source so `npm test` passes without pre-existing `dist`.
+- Current full CI test inventory: 139 unique tests (contracts 6, domain 33, MCP server 35, security 65).
 - Cost routing remains operational; unsupported quality/latency/custom ordering fails closed.
 
 ## Authentication deployment boundary
@@ -38,11 +47,11 @@ Current OpenAI developer documentation describes installable ChatGPT/Codex exten
 
 ## Current
 
-Phase 0G — synthetic repository-backed vertical slice.
+Phase 1 — minimal product orchestration.
 
 ## Canonical remaining order
 
-1. Phase 0G — synthetic repository-backed vertical slice.
+1. Phase 0G — synthetic repository-backed vertical slice (complete).
 2. Phase 1 — minimal product orchestration.
 3. Final clean verification and release-readiness review.
 

@@ -34,8 +34,10 @@ describe('GPTRouter MCP Apps UI', () => {
       'router',
       'tasks',
       'engineering',
+      'models',
       'providers_connections',
       'gateways_proxies',
+      'usage_budgets',
     ]);
   });
 
@@ -43,7 +45,7 @@ describe('GPTRouter MCP Apps UI', () => {
     const snapshot = createGPTRouterDashboardSnapshot('router');
 
     expect(snapshot.active_page).toBe('router');
-    expect(snapshot.data_mode).toBe('synthetic');
+    expect(snapshot.data_mode).toBe('synthetic_repository');
     expect(snapshot.safety).toEqual({
       planning_only: true,
       provider_execution_enabled: false,

@@ -15,7 +15,7 @@ import type {
 import { BudgetEnforcer, RoutingEngine, generateId } from '@gptrouter/domain';
 
 export const SYNTHETIC_ACCOUNT_ID = 'account-synthetic-v0';
-export const SYNTHETIC_DATA_MODE = 'synthetic_repository' as const;
+export const SYNTHETIC_DATA_MODE = 'synthetic_repository';
 
 export interface ListRoutesQuery {
   capability_filter?: string[];
@@ -460,10 +460,9 @@ export function createSyntheticGPTRouterApplication(): GPTRouterApplication {
       });
       const routes = await repositories.routes.listRoutes(SYNTHETIC_ACCOUNT_ID);
       const decision = await routingEngine.planRoute(task, policy, routes);
-      const { decided_at: _engineDecisionTime, ...decisionToPersist } = decision;
-      const persistedDecision = await repositories.decisions.createDecision(decisionToPersist);
+      const persistedDecision = await repositories.decisions.createDecision(decision);
       const selectedRoute = persistedDecision.selected_route_id
-        ? routes.find((route) => route.route_id === persistedDecision.selected_route_id) ?? null
+        ? (routes.find((route) => route.route_id === persistedDecision.selected_route_id) ?? null)
         : null;
 
       return {

@@ -7,14 +7,11 @@
  */
 
 import type { ListModelsArgs, RouteTaskArgs, GetTaskArgs, GetUsageArgs } from './schemas.js';
-import {
-  createSyntheticGPTRouterApplication,
-  type GPTRouterApplication,
-} from './application.js';
+import { createSyntheticGPTRouterApplication, type GPTRouterApplication } from './application.js';
 
-function toolResult<T extends Record<string, unknown>>(value: T) {
+function toolResult<T extends object>(value: T) {
   return {
-    structuredContent: value,
+    structuredContent: value as Record<string, unknown>,
     content: [
       {
         type: 'text' as const,
@@ -68,7 +65,7 @@ export function createGPTRouterHandlers(application: GPTRouterApplication) {
 // Production transport factories inject their own runtime-scoped application.
 const defaultHandlers = createGPTRouterHandlers(createSyntheticGPTRouterApplication());
 
-export const listModelsHandler = defaultHandlers.listModelsHandler;
-export const routeTaskHandler = defaultHandlers.routeTaskHandler;
-export const getTaskHandler = defaultHandlers.getTaskHandler;
-export const getUsageHandler = defaultHandlers.getUsageHandler;
+export const listModelsHandler = (args: ListModelsArgs) => defaultHandlers.listModelsHandler(args);
+export const routeTaskHandler = (args: RouteTaskArgs) => defaultHandlers.routeTaskHandler(args);
+export const getTaskHandler = (args: GetTaskArgs) => defaultHandlers.getTaskHandler(args);
+export const getUsageHandler = (args: GetUsageArgs) => defaultHandlers.getUsageHandler(args);

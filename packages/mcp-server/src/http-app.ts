@@ -6,10 +6,7 @@ import {
   localhostOriginValidation,
 } from '@modelcontextprotocol/node';
 import { createGPTRouterMcpServer } from './mcp-server-factory.js';
-import {
-  createSyntheticGPTRouterApplication,
-  type GPTRouterApplication,
-} from './application.js';
+import { createSyntheticGPTRouterApplication, type GPTRouterApplication } from './application.js';
 import {
   applyRemoteNetworkBoundary,
   applyRemoteRequestBoundary,

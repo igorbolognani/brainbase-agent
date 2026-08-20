@@ -1,10 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/server';
 import { ListModelsInput, RouteTaskInput, GetTaskInput, GetUsageInput } from './schemas.js';
 import { createGPTRouterHandlers } from './handlers.js';
-import {
-  createSyntheticGPTRouterApplication,
-  type GPTRouterApplication,
-} from './application.js';
+import { createSyntheticGPTRouterApplication, type GPTRouterApplication } from './application.js';
 import { registerGPTRouterDashboardUi } from './plugin-ui.js';
 
 export interface GPTRouterMcpServerOptions {
@@ -19,9 +16,7 @@ export interface GPTRouterMcpServerOptions {
  * runtime-scoped application state. This keeps HTTP task planning/retrieval
  * coherent without making the MCP server object itself the authoritative store.
  */
-export function createGPTRouterMcpServer(
-  options: GPTRouterMcpServerOptions = {}
-): McpServer {
+export function createGPTRouterMcpServer(options: GPTRouterMcpServerOptions = {}): McpServer {
   const application = options.application ?? createSyntheticGPTRouterApplication();
   const handlers = createGPTRouterHandlers(application);
   const server = new McpServer({
@@ -36,7 +31,7 @@ export function createGPTRouterMcpServer(
         'List repository-backed synthetic model routes with safe pricing/provenance projections. Read-only and no-spend.',
       inputSchema: ListModelsInput,
     },
-    handlers.listModelsHandler
+    async (args) => handlers.listModelsHandler(args)
   );
 
   server.registerTool(
@@ -46,7 +41,7 @@ export function createGPTRouterMcpServer(
         'Plan the best route for a task using the real RoutingEngine and repository-backed synthetic state. DOES NOT execute or spend money.',
       inputSchema: RouteTaskInput,
     },
-    handlers.routeTaskHandler
+    async (args) => handlers.routeTaskHandler(args)
   );
 
   server.registerTool(
@@ -56,7 +51,7 @@ export function createGPTRouterMcpServer(
         'Retrieve a repository-backed planned task and its latest routing decision. No execution is performed.',
       inputSchema: GetTaskInput,
     },
-    handlers.getTaskHandler
+    async (args) => handlers.getTaskHandler(args)
   );
 
   server.registerTool(
@@ -66,7 +61,7 @@ export function createGPTRouterMcpServer(
         'Get synthetic session planning estimates separately from actual provider spend, which remains zero.',
       inputSchema: GetUsageInput,
     },
-    handlers.getUsageHandler
+    async (args) => handlers.getUsageHandler(args)
   );
 
   registerGPTRouterDashboardUi(server, {

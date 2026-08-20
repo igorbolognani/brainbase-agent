@@ -36,7 +36,8 @@ const pageDefinitions: Record<GPTRouterDashboardPageId, PageDefinition> = {
     label: 'Overview',
     eyebrow: 'CONTROL SURFACE',
     status: 'functional_shell',
-    summary: 'GPTRouter repository-backed synthetic control surface. Provider execution remains disabled.',
+    summary:
+      'GPTRouter repository-backed synthetic control surface. Provider execution remains disabled.',
     items: [
       'Routing mode: lowest-cost adequate capability',
       'Execution: disabled',
@@ -48,7 +49,8 @@ const pageDefinitions: Record<GPTRouterDashboardPageId, PageDefinition> = {
     label: 'Router',
     eyebrow: 'PLANNING ONLY',
     status: 'functional_shell',
-    summary: 'Routing decisions use the real RoutingEngine over repository-backed synthetic routes.',
+    summary:
+      'Routing decisions use the real RoutingEngine over repository-backed synthetic routes.',
     items: [
       'Cost ordering is operational',
       'Quality, latency, and custom ordering fail closed',
@@ -115,7 +117,8 @@ const pageDefinitions: Record<GPTRouterDashboardPageId, PageDefinition> = {
     label: 'Usage & Budgets',
     eyebrow: 'NO-SPEND SESSION',
     status: 'functional_shell',
-    summary: 'Planning estimates are tracked separately from actual provider spend, which remains zero.',
+    summary:
+      'Planning estimates are tracked separately from actual provider spend, which remains zero.',
     items: [
       'Estimated planned cost is not actual cost',
       'Actual provider executions: zero',
@@ -126,7 +129,8 @@ const pageDefinitions: Record<GPTRouterDashboardPageId, PageDefinition> = {
     label: 'Security & Permissions',
     eyebrow: 'PLACEHOLDER',
     status: 'placeholder',
-    summary: 'Backend security exists; this page is not wired to authoritative production identity state yet.',
+    summary:
+      'Backend security exists; this page is not wired to authoritative production identity state yet.',
     items: [
       'OAuth resource-server boundary is implemented',
       'Tenant membership and role checks are implemented',
