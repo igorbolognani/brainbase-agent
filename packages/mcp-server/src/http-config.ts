@@ -160,7 +160,16 @@ export function isAllowedOrigin(
     return false;
   }
 
-  if (parsed.protocol !== 'https:' || parsed.username || parsed.password) return false;
+  if (
+    parsed.protocol !== 'https:' ||
+    parsed.username ||
+    parsed.password ||
+    parsed.pathname !== '/' ||
+    parsed.search ||
+    parsed.hash
+  ) {
+    return false;
+  }
   return allowedOrigins.includes(parsed.origin.toLowerCase());
 }
 
