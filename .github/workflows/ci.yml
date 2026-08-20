@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - 'feat/**'
+      - 'work/**'
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install reproducibly
+        run: |
+          set -euo pipefail
+          npm ci
+
+      - name: Format
+        run: |
+          set -euo pipefail
+          npm run format:check
+
+      - name: Lint
+        run: |
+          set -euo pipefail
+          npm run lint
+
+      - name: Typecheck from source
+        run: |
+          set -euo pipefail
+          rm -rf packages/*/dist packages/*/*.tsbuildinfo
+          npm run typecheck
+
+      - name: Test
+        run: |
+          set -euo pipefail
+          npm test
+
+      - name: Clean build
+        run: |
+          set -euo pipefail
+          rm -rf packages/*/dist packages/*/*.tsbuildinfo
+          npm run build
+
+      - name: Dependency audit
+        run: |
+          set -euo pipefail
+          npm audit --audit-level=high
+
+      - name: Ensure generated outputs are not tracked
+        run: |
+          set -euo pipefail
+          if git ls-files | grep -E '(^|/)dist/|\.tsbuildinfo$'; then
+            echo 'Generated build outputs must not be tracked.' >&2
+            exit 1
+          fi
