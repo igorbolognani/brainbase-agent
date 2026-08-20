@@ -268,7 +268,8 @@ export class RoutingEngine {
       return this.securityRejection('Gateway URL is invalid');
     }
 
-    if (gatewayUrl.protocol !== 'https:') return this.securityRejection('Gateway URL must use HTTPS');
+    if (gatewayUrl.protocol !== 'https:')
+      return this.securityRejection('Gateway URL must use HTTPS');
     if (gatewayUrl.username || gatewayUrl.password) {
       return this.securityRejection('Gateway URL must not contain credentials');
     }
