@@ -4,6 +4,7 @@ import {
   GPTRouterDashboardHtml,
   GPTRouterDashboardPageIds,
   GPTRouterDashboardResourceUri,
+  GPTRouterMcpAppsProtocolVersion,
 } from '../plugin-ui.js';
 
 describe('GPTRouter MCP Apps UI', () => {
@@ -52,10 +53,14 @@ describe('GPTRouter MCP Apps UI', () => {
     expect(snapshot.pages.tasks.items).toContain('No run_task tool is registered');
   });
 
-  it('uses a versioned MCP Apps resource with no external asset dependency', () => {
+  it('uses the stable MCP Apps view handshake and no external asset dependency', () => {
+    expect(GPTRouterMcpAppsProtocolVersion).toBe('2026-01-26');
     expect(GPTRouterDashboardResourceUri).toBe('ui://gptrouter/dashboard-v1.html');
     expect(GPTRouterDashboardHtml).toContain('Synthetic / no-spend');
     expect(GPTRouterDashboardHtml).toContain('ui/initialize');
+    expect(GPTRouterDashboardHtml).toContain('appInfo');
+    expect(GPTRouterDashboardHtml).toContain('appCapabilities');
+    expect(GPTRouterDashboardHtml).toContain('ui/notifications/initialized');
     expect(GPTRouterDashboardHtml).toContain('ui/notifications/tool-result');
     expect(GPTRouterDashboardHtml).not.toContain('https://cdn.');
   });

@@ -1,36 +1,40 @@
 # Next Task
 
-## Phase 0F — Plugin / MCP Apps UI
+## Phase 0G — Synthetic Repository-Backed Vertical Slice
 
-Finish and verify the first real GPTRouter custom UI using the current OpenAI plugin + MCP Apps architecture.
+Replace MCP handler-local hardcoded fixtures with one authoritative synthetic application state backed by repository abstractions, while keeping the entire slice no-spend.
 
 ### Required
 
-- Keep existing MCP data tools useful without UI.
-- Expose a versioned MCP Apps resource with MIME type `text/html;profile=mcp-app`.
-- Associate only the dedicated render tool with `_meta.ui.resourceUri`.
-- Use the portable `ui/*` JSON-RPC bridge as the primary UI-host contract.
-- Keep `openai/outputTemplate` only as a compatibility alias.
-- Render the complete GPTRouter navigation shell.
-- Clearly mark synthetic/no-spend state and placeholder pages.
-- Keep `route_task` planning-only; do not add `run_task` or provider execution.
-- Load no external UI assets in this first shell.
+- Keep `route_task` planning-only and do not add provider execution.
+- Introduce a minimal application/service boundary that composes existing domain routing, budget checks, connection metadata, and repositories.
+- Replace handler-local fake production model names/prices with clearly synthetic route/model fixtures and explicit synthetic provenance.
+- Back `list_models`, `route_task`, `get_task`, and `get_usage` with the same authoritative synthetic repository state.
+- Persist planned tasks and routing decisions in the synthetic repository so `get_task` can retrieve the result of a prior `route_task` call.
+- Keep estimated cost separate from actual cost; actual provider spend remains zero.
+- Keep account scoping explicit in repository/service APIs.
+- Feed the UI from safe projections of the same application state rather than creating a second UI-owned store.
+- Preserve all Phase 0B/0C/0D/0E/0F security and no-spend boundaries.
 
-### Required tests
+### Required end-to-end proof
 
-- real HTTP `resources/list` includes the GPTRouter UI resource;
-- real HTTP `resources/read` returns the MCP Apps MIME type and UI document;
-- `tools/list` includes the render tool and still excludes `run_task`;
-- render tool returns complete structured navigation and synthetic/no-spend safety state;
-- full deterministic CI is green.
+Through the real MCP HTTP boundary:
+
+1. `list_models` returns repository-backed synthetic routes;
+2. `route_task` invokes the real RoutingEngine and creates a planning task;
+3. `get_task` retrieves that planned task and routing decision;
+4. `get_usage` reports zero actual spend and truthful synthetic/estimated state;
+5. the dashboard render tool projects the same safe state;
+6. no outbound provider/gateway execution adapter is invoked.
 
 ### Do not implement yet
 
-- paid provider execution;
-- durable product repositories;
-- generic workflow builder;
-- production usage ledger.
+- real paid provider execution;
+- generic workflow/node editor;
+- private/local gateway bridge;
+- production database deployment;
+- production usage reconciliation.
 
 ### Exit gate
 
-After the UI resource/tool and tests are green, advance to Phase 0G synthetic repository-backed vertical slice.
+Full deterministic CI plus a synthetic no-spend vertical-slice test must be green before Phase 1 minimal orchestration begins.
