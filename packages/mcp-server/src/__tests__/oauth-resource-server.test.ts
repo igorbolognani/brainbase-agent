@@ -37,12 +37,10 @@ function verifier(): OAuthTokenVerifier {
 
 function fakeHandler(observed: { auth?: AuthInfo }): McpHttpHandler {
   return {
-    fetch: vi.fn(
-      async (_request: Request, options?: Parameters<McpHttpHandler['fetch']>[1]) => {
-        observed.auth = options?.authInfo;
-        return Response.json({ ok: true });
-      }
-    ),
+    fetch: vi.fn(async (_request: Request, options?: Parameters<McpHttpHandler['fetch']>[1]) => {
+      observed.auth = options?.authInfo;
+      return Response.json({ ok: true });
+    }),
     close: vi.fn(async () => undefined),
     notify: {} as McpHttpHandler['notify'],
     bus: {} as McpHttpHandler['bus'],
