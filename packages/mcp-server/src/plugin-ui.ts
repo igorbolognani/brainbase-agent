@@ -1,5 +1,6 @@
 import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
+import type { DashboardRuntimeSummary } from './application.js';
 
 export const GPTRouterDashboardResourceUri = 'ui://gptrouter/dashboard-v1.html';
 export const GPTRouterMcpAppsProtocolVersion = '2026-01-26';
@@ -35,19 +36,19 @@ const pageDefinitions: Record<GPTRouterDashboardPageId, PageDefinition> = {
     label: 'Overview',
     eyebrow: 'CONTROL SURFACE',
     status: 'functional_shell',
-    summary: 'GPTRouter development control surface. Phase 0F data is synthetic and no-spend.',
+    summary: 'GPTRouter repository-backed synthetic control surface. Provider execution remains disabled.',
     items: [
       'Routing mode: lowest-cost adequate capability',
       'Execution: disabled',
       'Remote MCP: available behind configured security boundaries',
-      'Data source: synthetic fixtures until Phase 0G',
+      'Data source: authoritative synthetic repository state',
     ],
   },
   router: {
     label: 'Router',
     eyebrow: 'PLANNING ONLY',
     status: 'functional_shell',
-    summary: 'Routing decisions are inspectable here; route_task cannot execute providers.',
+    summary: 'Routing decisions use the real RoutingEngine over repository-backed synthetic routes.',
     items: [
       'Cost ordering is operational',
       'Quality, latency, and custom ordering fail closed',
@@ -57,13 +58,13 @@ const pageDefinitions: Record<GPTRouterDashboardPageId, PageDefinition> = {
   },
   tasks: {
     label: 'Tasks',
-    eyebrow: 'TASK STATE',
+    eyebrow: 'REPOSITORY STATE',
     status: 'functional_shell',
-    summary: 'Task views expose planning state only in this phase.',
+    summary: 'Planned tasks and routing decisions persist in the synthetic runtime repository.',
     items: [
       'No run_task tool is registered',
       'No provider dispatch is reachable from task planning',
-      'Repository-backed task persistence is deferred to Phase 0G',
+      'get_task reads the same state written by route_task',
     ],
   },
   engineering: {
@@ -79,12 +80,13 @@ const pageDefinitions: Record<GPTRouterDashboardPageId, PageDefinition> = {
   },
   models: {
     label: 'Models',
-    eyebrow: 'PLACEHOLDER',
-    status: 'placeholder',
-    summary: 'A repository-backed model catalog has not been connected yet.',
+    eyebrow: 'SYNTHETIC CATALOG',
+    status: 'functional_shell',
+    summary: 'The current model/route catalog is repository-backed and explicitly synthetic.',
     items: [
-      'Current list_models output is synthetic fixture data',
-      'Production model and pricing data are not hardcoded into the domain layer',
+      'Synthetic route IDs replace production-looking fake model names',
+      'Pricing provenance is synthetic-fixture',
+      'No production model or pricing catalog is hardcoded into the domain layer',
     ],
   },
   providers_connections: {
@@ -111,19 +113,20 @@ const pageDefinitions: Record<GPTRouterDashboardPageId, PageDefinition> = {
   },
   usage_budgets: {
     label: 'Usage & Budgets',
-    eyebrow: 'PLACEHOLDER',
-    status: 'placeholder',
-    summary: 'Usage reconciliation and durable budget accounting are not implemented yet.',
+    eyebrow: 'NO-SPEND SESSION',
+    status: 'functional_shell',
+    summary: 'Planning estimates are tracked separately from actual provider spend, which remains zero.',
     items: [
-      'Current get_usage output is a zero-value synthetic fixture',
-      'Estimated cost is not treated as actual spend',
+      'Estimated planned cost is not actual cost',
+      'Actual provider executions: zero',
+      'Production usage reconciliation remains deferred',
     ],
   },
   security_permissions: {
     label: 'Security & Permissions',
     eyebrow: 'PLACEHOLDER',
     status: 'placeholder',
-    summary: 'Backend security exists; this page is not wired to authoritative runtime state yet.',
+    summary: 'Backend security exists; this page is not wired to authoritative production identity state yet.',
     items: [
       'OAuth resource-server boundary is implemented',
       'Tenant membership and role checks are implemented',
@@ -134,9 +137,9 @@ const pageDefinitions: Record<GPTRouterDashboardPageId, PageDefinition> = {
     label: 'Activity / Audit',
     eyebrow: 'PLACEHOLDER',
     status: 'placeholder',
-    summary: 'Durable activity and audit storage is deferred.',
+    summary: 'Durable production activity and audit storage is deferred.',
     items: [
-      'Do not infer activity from synthetic UI state',
+      'Do not infer production activity from synthetic session state',
       'No production usage ledger exists yet',
     ],
   },
@@ -144,15 +147,25 @@ const pageDefinitions: Record<GPTRouterDashboardPageId, PageDefinition> = {
     label: 'Settings',
     eyebrow: 'PLACEHOLDER',
     status: 'placeholder',
-    summary: 'Account-level product settings are not persisted yet.',
-    items: ['No control in this shell mutates authoritative business state'],
+    summary: 'Account-level product settings are not persisted in a production database yet.',
+    items: ['No control in this shell mutates production business state'],
   },
+};
+
+const emptyRuntimeSummary: DashboardRuntimeSummary = {
+  data_source: 'synthetic_repository',
+  route_count: 0,
+  task_count: 0,
+  decision_count: 0,
+  execution_count: 0,
+  actual_spend: 0,
+  estimated_planned_cost: 0,
 };
 
 export interface GPTRouterDashboardSnapshot {
   schema_version: '1';
   product: 'GPTRouter';
-  data_mode: 'synthetic';
+  data_mode: 'synthetic_repository';
   active_page: GPTRouterDashboardPageId;
   navigation: Array<{ id: GPTRouterDashboardPageId; label: string; status: PageStatus }>;
   safety: {
@@ -161,16 +174,18 @@ export interface GPTRouterDashboardSnapshot {
     paid_calls_enabled: false;
     fixture_data: true;
   };
+  runtime: DashboardRuntimeSummary;
   pages: Record<GPTRouterDashboardPageId, PageDefinition>;
 }
 
 export function createGPTRouterDashboardSnapshot(
-  activePage: GPTRouterDashboardPageId = 'overview'
+  activePage: GPTRouterDashboardPageId = 'overview',
+  runtime: DashboardRuntimeSummary = emptyRuntimeSummary
 ): GPTRouterDashboardSnapshot {
   return {
     schema_version: '1',
     product: 'GPTRouter',
-    data_mode: 'synthetic',
+    data_mode: 'synthetic_repository',
     active_page: activePage,
     navigation: GPTRouterDashboardPageIds.map((id) => ({
       id,
@@ -183,6 +198,7 @@ export function createGPTRouterDashboardSnapshot(
       paid_calls_enabled: false,
       fixture_data: true,
     },
+    runtime: { ...runtime },
     pages: pageDefinitions,
   };
 }
@@ -204,7 +220,7 @@ const pending=new Map();let nextId=1;let snapshot=null;let activePage="overview"
 function post(message){window.parent.postMessage(message,"*")}
 function request(method,params){const id=nextId++;post({jsonrpc:"2.0",id,method,params});return new Promise((resolve,reject)=>pending.set(id,{resolve,reject}))}
 function notify(method,params={}){post({jsonrpc:"2.0",method,params})}
-function render(){if(!snapshot||!snapshot.pages)return;const nav=document.getElementById("nav");const content=document.getElementById("content");const page=snapshot.pages[activePage]||snapshot.pages.overview;nav.replaceChildren();for(const item of snapshot.navigation||[]){const b=document.createElement("button");b.type="button";b.className="nav";b.textContent=item.label;if(item.id===activePage)b.setAttribute("aria-current","page");b.addEventListener("click",()=>{activePage=item.id;render();request("ui/update-model-context",{content:[{type:"text",text:"GPTRouter UI page: "+item.label}]}).catch(()=>undefined)});nav.appendChild(b)}content.replaceChildren();const eyebrow=document.createElement("div");eyebrow.className="eyebrow";eyebrow.textContent=page.eyebrow;const title=document.createElement("h1");title.textContent=page.label;const summary=document.createElement("p");summary.className="summary";summary.textContent=page.summary;const status=document.createElement("div");status.className="status";const state=document.createElement("span");state.className="pill "+(page.status==="functional_shell"?"ok":"");state.textContent=page.status==="functional_shell"?"Functional shell":"Placeholder";const safety=document.createElement("span");safety.className="pill";safety.textContent="Provider execution disabled";status.append(state,safety);const cards=document.createElement("div");cards.className="cards";for(const item of page.items||[]){const card=document.createElement("section");card.className="card";card.textContent=item;cards.appendChild(card)}content.append(eyebrow,title,summary,status,cards)}
+function render(){if(!snapshot||!snapshot.pages)return;const nav=document.getElementById("nav");const content=document.getElementById("content");const page=snapshot.pages[activePage]||snapshot.pages.overview;nav.replaceChildren();for(const item of snapshot.navigation||[]){const b=document.createElement("button");b.type="button";b.className="nav";b.textContent=item.label;if(item.id===activePage)b.setAttribute("aria-current","page");b.addEventListener("click",()=>{activePage=item.id;render();request("ui/update-model-context",{content:[{type:"text",text:"GPTRouter UI page: "+item.label}]}).catch(()=>undefined)});nav.appendChild(b)}content.replaceChildren();const eyebrow=document.createElement("div");eyebrow.className="eyebrow";eyebrow.textContent=page.eyebrow;const title=document.createElement("h1");title.textContent=page.label;const summary=document.createElement("p");summary.className="summary";summary.textContent=page.summary;const status=document.createElement("div");status.className="status";const state=document.createElement("span");state.className="pill "+(page.status==="functional_shell"?"ok":"");state.textContent=page.status==="functional_shell"?"Functional shell":"Placeholder";const safety=document.createElement("span");safety.className="pill";safety.textContent="Provider execution disabled";status.append(state,safety);if(snapshot.runtime){for(const value of ["Routes "+snapshot.runtime.route_count,"Tasks "+snapshot.runtime.task_count,"Actual spend $"+snapshot.runtime.actual_spend.toFixed(2)]){const pill=document.createElement("span");pill.className="pill";pill.textContent=value;status.appendChild(pill)}}const cards=document.createElement("div");cards.className="cards";for(const item of page.items||[]){const card=document.createElement("section");card.className="card";card.textContent=item;cards.appendChild(card)}content.append(eyebrow,title,summary,status,cards)}
 window.addEventListener("message",event=>{if(event.source!==window.parent)return;const message=event.data;if(!message||message.jsonrpc!=="2.0")return;if(message.id!==undefined&&pending.has(message.id)){const p=pending.get(message.id);pending.delete(message.id);message.error?p.reject(message.error):p.resolve(message.result);return}if(message.method==="ui/notifications/tool-input"){const input=message.params;if(input&&input.active_page)activePage=input.active_page}if(message.method==="ui/notifications/tool-result"){snapshot=message.params&&message.params.structuredContent;if(snapshot&&snapshot.active_page)activePage=snapshot.active_page;render()}},{passive:true});
 const compatibilityOutput=window.openai&&window.openai.toolOutput;if(compatibilityOutput){snapshot=compatibilityOutput;if(snapshot.active_page)activePage=snapshot.active_page;render()}
 request("ui/initialize",{protocolVersion:"${GPTRouterMcpAppsProtocolVersion}",appInfo:{name:"gptrouter-dashboard",title:"GPTRouter",version:"0.1.0"},appCapabilities:{availableDisplayModes:["inline"]}}).then(()=>notify("ui/notifications/initialized")).catch(()=>undefined);
@@ -216,7 +232,14 @@ const RenderDashboardInput = {
   active_page: z.enum(GPTRouterDashboardPageIds).optional(),
 };
 
-export function registerGPTRouterDashboardUi(server: McpServer): void {
+export interface GPTRouterDashboardUiOptions {
+  getRuntimeSummary?: () => Promise<DashboardRuntimeSummary>;
+}
+
+export function registerGPTRouterDashboardUi(
+  server: McpServer,
+  options: GPTRouterDashboardUiOptions = {}
+): void {
   server.registerResource('gptrouter-dashboard', GPTRouterDashboardResourceUri, {}, async () => ({
     contents: [
       {
@@ -238,7 +261,7 @@ export function registerGPTRouterDashboardUi(server: McpServer): void {
     {
       title: 'Render GPTRouter dashboard',
       description:
-        'Render the GPTRouter development control surface. Phase 0F state is synthetic/no-spend and is not authoritative production state.',
+        'Render repository-backed synthetic GPTRouter state. Provider execution and paid calls remain disabled.',
       inputSchema: RenderDashboardInput,
       _meta: {
         ui: { resourceUri: GPTRouterDashboardResourceUri },
@@ -248,13 +271,16 @@ export function registerGPTRouterDashboardUi(server: McpServer): void {
       },
     },
     async ({ active_page }) => {
-      const dashboard = createGPTRouterDashboardSnapshot(active_page ?? 'overview');
+      const runtime = options.getRuntimeSummary
+        ? await options.getRuntimeSummary()
+        : emptyRuntimeSummary;
+      const dashboard = createGPTRouterDashboardSnapshot(active_page ?? 'overview', runtime);
       return {
         structuredContent: dashboard,
         content: [
           {
             type: 'text' as const,
-            text: 'Rendered GPTRouter Phase 0F using synthetic, planning-only, no-spend state.',
+            text: 'Rendered repository-backed synthetic GPTRouter state. No provider execution or spending occurs.',
           },
         ],
       };
