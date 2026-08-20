@@ -58,7 +58,13 @@ function normalizeConfiguredOrigin(origin: string): string {
   if (parsed.protocol !== 'https:') {
     throw new Error(`Remote allowed origins must use HTTPS: ${origin}`);
   }
-  if (parsed.username || parsed.password || parsed.pathname !== '/' || parsed.search || parsed.hash) {
+  if (
+    parsed.username ||
+    parsed.password ||
+    parsed.pathname !== '/' ||
+    parsed.search ||
+    parsed.hash
+  ) {
     throw new Error(`Allowed origin must be an origin only: ${origin}`);
   }
   return parsed.origin.toLowerCase();
@@ -139,7 +145,10 @@ export function isAllowedHost(hostHeader: string | undefined, allowedHosts: stri
   return allowedHosts.some((allowed) => allowed.replace(/^\[|\]$/g, '').toLowerCase() === hostname);
 }
 
-export function isAllowedOrigin(originHeader: string | undefined, allowedOrigins: string[]): boolean {
+export function isAllowedOrigin(
+  originHeader: string | undefined,
+  allowedOrigins: string[]
+): boolean {
   // Non-browser MCP clients commonly omit Origin; Host + bearer auth still apply.
   if (originHeader === undefined) return true;
   if (originHeader === 'null') return false;
