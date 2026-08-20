@@ -4,15 +4,17 @@ on:
   push:
     branches:
       - main
-      - 'feat/**'
-      - 'work/**'
+      - feat/gptrouter-v0-system-design
   pull_request:
+    branches:
+      - main
+      - feat/gptrouter-v0-system-design
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -37,11 +39,10 @@ jobs:
           set -euo pipefail
           npm ci
 
-      - name: Format
+      - name: Format check
         run: |
           set -euo pipefail
-          npm run format
-          git diff --exit-code
+          npm run format:check
 
       - name: Lint
         run: |
