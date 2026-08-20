@@ -18,9 +18,7 @@ function account(id = 'account-1'): Account {
   return { account_id: id, name: 'Test Account', created_at: NOW, updated_at: NOW };
 }
 
-function membership(
-  overrides: Partial<AccountMembership> = {}
-): AccountMembership {
+function membership(overrides: Partial<AccountMembership> = {}): AccountMembership {
   return {
     membership_id: 'membership-1',
     account_id: 'account-1',
@@ -58,7 +56,11 @@ async function expectDenied(
 
 describe('AccountAuthorizationService', () => {
   it('authorizes an active same-account membership', async () => {
-    const result = await service(account(), membership()).authorize(principal(), 'account-1', 'member');
+    const result = await service(account(), membership()).authorize(
+      principal(),
+      'account-1',
+      'member'
+    );
     expect(result.account.account_id).toBe('account-1');
     expect(result.membership.role).toBe('member');
   });
@@ -97,9 +99,12 @@ describe('AccountAuthorizationService', () => {
     ['admin', 'member'],
     ['owner', 'admin'],
     ['owner', 'owner'],
-  ] as Array<[MembershipRole, MembershipRole]>)('accepts role %s for minimum %s', async (role, minimum) => {
-    await expect(
-      service(account(), membership({ role })).authorize(principal(), 'account-1', minimum)
-    ).resolves.toBeTruthy();
-  });
+  ] as Array<[MembershipRole, MembershipRole]>)(
+    'accepts role %s for minimum %s',
+    async (role, minimum) => {
+      await expect(
+        service(account(), membership({ role })).authorize(principal(), 'account-1', minimum)
+      ).resolves.toBeTruthy();
+    }
+  );
 });
