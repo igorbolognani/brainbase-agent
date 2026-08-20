@@ -56,10 +56,10 @@ Original verified baseline for this sequence: `20ea09a734269aa630650180831fc8c2b
   - `get_usage` implements truthful today/week/month filtering using injected clock (`SyntheticApplicationOptions.clock`). Exposes: planning requests, root executions, attempts, completed, failed, cancelled, estimated planned cost, actual cost, variance. Account-scoped.
   - `get_audit_events` tool: account-scoped activity/audit projection backed by `AuditRepository`. Bounded results (max 100, default 50), allowlisted fields only, sanitized metadata via `safeAuditMetadata`, no secret-bearing blobs. Pagination via `limit`/`offset`, filter by `event_type`.
   - Dashboard updated: Overview, Tasks, Usage & Budgets, Activity / Audit (now functional shell), Security & Permissions. Shows retry count, fallback count, cancellation state, actual vs estimated, audit degraded. `synthetic_execution_enabled=true`, `provider_execution_enabled=false`, `paid_calls_enabled=false`.
-  - Modern MCP HTTP: Real Node HTTP tests exercise `initialize`, `tools/list`, `tools/call`, `resources/list`, `resources/read`. Protocol version `2025-06-18` supported. Session ID returned in initialize result. Session propagation via `Mcp-Session-Id` header tested. Streamable HTTP is stateless by design; no SSE disconnect cancellation implemented.
+  - Modern MCP HTTP: Real Node HTTP tests exercise `initialize`, `tools/list`, `tools/call`, `resources/list`, `resources/read`. Protocol version `2025-06-18` negotiated. **Streamable HTTP is stateless** — no `Mcp-Session-Id` header returned, no session propagation, each request creates a fresh per-request transport. SSE used for response streaming; no SSE disconnect cancellation implemented.
   - Consequential/read-only metadata: Tool annotations set per MCP SDK (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`). No invented annotations.
   - No real provider execution; `provider_execution_enabled=false` throughout.
-- Current full locally clean-gate test inventory: 159 unique tests (contracts 6, domain 40, MCP server 48, security 65).
+- Current full locally clean-gate test inventory: 179 unique tests (contracts 6, domain 40, MCP server 68, security 65).
 - Cost routing remains operational; unsupported quality/latency/custom ordering fails closed.
 
 ## Authentication deployment boundary

@@ -619,4 +619,92 @@ describe('MCP Streamable HTTP boundary', () => {
     expect(dashboard.safety.planning_only).toBe(false);
     expect(dashboard.safety.synthetic_execution_enabled).toBe(true);
   });
+
+  it('calls get_audit_events over HTTP and proves account authorization', async () => {
+    const result = await post(port, {
+      jsonrpc: '2.0',
+      id: 'audit-1',
+      method: 'tools/call',
+      params: {
+        name: 'get_audit_events',
+        arguments: { limit: 5 },
+      },
+    });
+
+    expect(result.status).toBe(200);
+    const rpc = parseRpcBody(result.body);
+    expect(rpc.error).toBeUndefined();
+    const content = (rpc.result as { content: Array<{ type: string; text: string }> }).content;
+    const audit = JSON.parse(content[0].text) as Array<{
+      event_id: string;
+      event_type: string;
+      actor: string;
+      resource_type: string | null;
+      resource_id: string | null;
+      metadata: Record<string, unknown>;
+      timestamp: string;
+    }>;
+    expect(Array.isArray(audit)).toBe(true);
+    expect(audit.length).toBeLessThanOrEqual(5);
+  });
+
+  it('get_audit_events returns empty for foreign account', async () => {
+    const foreignRuntime = createGPTRouterHttpRuntime(remoteConfig(), {
+      oauth: {
+        verifier: oauthVerifier(),
+        oauthMetadata: OAUTH_METADATA,
+        resourceServerUrl: new URL('https://api.example.com/mcp'),
+      },
+    });
+    const foreignPort = await listen(foreignRuntime);
+
+    const result = await post(foreignPort, {
+      jsonrpc: '2.0',
+      id: 'audit-foreign',
+      method: 'tools/call',
+      params: {
+        name: 'get_audit_events',
+        arguments: { limit: 5 },
+      },
+    });
+
+    expect(result.status).toBe(200);
+    const rpc = parseRpcBody(result.body);
+    expect(rpc.error).toBeUndefined();
+    const content = (rpc.result as { content: Array<{ type: string; text: string }> }).content;
+    const audit = JSON.parse(content[0].text) as Array<unknown>;
+    expect(audit.length).toBe(0);
+
+    await foreignRuntime.close();
+  });
+
+  it('read tools have no execution side effect', async () => {
+    const listResult = await post(port, {
+      jsonrpc: '2.0',
+      id: 'side-effect-1',
+      method: 'tools/call',
+      params: { name: 'list_models', arguments: {} },
+    });
+    expect(listResult.status).toBe(200);
+
+    const getResult = await post(port, {
+      jsonrpc: '2.0',
+      id: 'side-effect-2',
+      method: 'tools/call',
+      params: { name: 'get_audit_events', arguments: { limit: 5 } },
+    });
+    expect(getResult.status).toBe(200);
+
+    const dashboardResult = await post(port, {
+      jsonrpc: '2.0',
+      id: 'side-effect-3',
+      method: 'tools/call',
+      params: { name: 'render_gptrouter_dashboard', arguments: { active_page: 'overview' } },
+    });
+    expect(dashboardResult.status).toBe(200);
+
+    const allOutputs = [listResult.body, getResult.body, dashboardResult.body].join(' ');
+    expect(allOutputs).not.toContain('opaque-synthetic-reference');
+    expect(allOutputs).not.toContain('credential_reference');
+  });
 });
