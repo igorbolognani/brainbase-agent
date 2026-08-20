@@ -59,7 +59,24 @@ Original verified baseline for this sequence: `20ea09a734269aa630650180831fc8c2b
   - Modern MCP HTTP: Real Node HTTP tests exercise `initialize`, `tools/list`, `tools/call`, `resources/list`, `resources/read`. Protocol version `2025-06-18` negotiated. **Streamable HTTP is stateless** — no `Mcp-Session-Id` header returned, no session propagation, each request creates a fresh per-request transport. SSE used for response streaming; no SSE disconnect cancellation implemented.
   - Consequential/read-only metadata: Tool annotations set per MCP SDK (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`). No invented annotations.
   - No real provider execution; `provider_execution_enabled=false` throughout.
-- Current full locally clean-gate test inventory: 179 unique tests (contracts 6, domain 40, MCP server 68, security 65).
+- Phase 1D Provider/Gateway Execution Boundary with FAKE ADAPTERS ONLY is implemented and locally clean-gate verified:
+  - `ProviderAdapter` interface and `ProviderAdapterRegistry` provide explicit execution seam between orchestration and provider-specific behavior.
+  - `FakeProviderAdapter` implements deterministic synthetic outcomes: SUCCESS, RETRYABLE_FAILURE, TERMINAL_FAILURE, TIMEOUT, RATE_LIMIT, UNAVAILABLE, HOLD, CANCELLATION.
+  - Opaque connection references only (`connection_id`) — no raw credentials ever enter execution requests; security violation throws on `api_key`, `secret`, `access_token`.
+  - `AdapterExecutionCoordinatorBridge` translates domain `ExecutionInput` to provider-neutral `ProviderExecutionRequest` and normalizes results to `ExecutionOutput`.
+  - `AdapterExecutionVerifier` classifies fake adapter outcomes into existing `VerificationOutcome` taxonomy (`accepted` / `retryable_failure` / `terminal_failure`).
+  - All Phase 1B retry/fallback/cancellation semantics preserved: new `ExecutionAttempt` per retry, immutable fallback creates new `RoutingDecision`, CAS transitions, budget re-checked before every dispatch, idempotent replay no double-charge.
+  - Usage normalization: one `UsageRecord` per dispatched attempt, retry/fallback usage retained, actual cost aggregation correct, estimated planning cost distinct.
+  - Security: unknown adapter fails closed (`unknown_adapter`), invalid connection reference fails closed, account isolation enforced, read-only tools never dispatch, secret-safe projections.
+  - Feature gate: `provider_execution_enabled: false`, `paid_calls_enabled: false` — real provider execution remains structurally impossible.
+  - 5 new domain tests for fake adapter boundary.
+- Phase 1E V0.1 Synthetic Release Candidate is implemented and locally clean-gate verified:
+  - Integrated synthetic E2E flow verified: authorize -> plan -> route -> execute -> fake adapter -> verify -> reconcile usage -> audit -> get_task -> get_usage -> dashboard.
+  - Failure/degradation paths proven: retry exhaustion, fallback denial, cancellation race, audit degradation, invalid provider/connection, budget denial.
+  - MCP vertical slice verified: initialize, tools/list, resources/list, resources/read, route_task, run_task, get_task, get_usage, get_audit_events, cancel_execution, render_gptrouter_dashboard.
+  - Product/runtime projections truthful: routing decisions, attempts, retries, fallback, cancellation, usage, actual vs estimated cost, audit degradation, `synthetic_execution_enabled=true`, `provider_execution_enabled=false`, `paid_calls_enabled=false`.
+  - No fabricated production telemetry; functional shells correspond to actual backing tools.
+- Current full locally clean-gate test inventory: 193 unique tests (contracts 6, domain 45, MCP server 77, security 65).
 - Cost routing remains operational; unsupported quality/latency/custom ordering fails closed.
 
 ## Authentication deployment boundary
@@ -72,7 +89,7 @@ Current OpenAI developer documentation describes installable ChatGPT/Codex exten
 
 ## Current
 
-Phase 1D — Provider/Gateway Execution Boundary with FAKE ADAPTERS ONLY is next. Phase 1 is not complete.
+Phase 1D and Phase 1E are complete. V0.1 Synthetic Release Candidate is verified.
 
 ## Canonical remaining order
 
@@ -80,8 +97,8 @@ Phase 1D — Provider/Gateway Execution Boundary with FAKE ADAPTERS ONLY is next
 2. Phase 1A — authorized synthetic execution (complete).
 3. Phase 1B — bounded retry, fallback, and cancellation (complete).
 4. Phase 1C — execution observability + modern MCP runtime (complete).
-5. Phase 1D — Provider/Gateway Execution Boundary, FAKE ADAPTERS ONLY (next).
-6. Phase 1E — V0.1 Synthetic Release Candidate.
+5. Phase 1D — Provider/Gateway Execution Boundary, FAKE ADAPTERS ONLY (complete).
+6. Phase 1E — V0.1 Synthetic Release Candidate (complete).
 7. Real provider execution is deferred until after the synthetic release candidate and independent review.
 8. Final clean verification and release-readiness review.
 

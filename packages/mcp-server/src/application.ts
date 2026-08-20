@@ -111,8 +111,30 @@ export interface TaskProjection {
     created_at: string;
   };
   routing_decisions: PublicRoutingDecision[];
+  decision_tree: {
+    decision_id: string;
+    parent_decision_id: string | null;
+    fallback_reason: string | null;
+    selected_route_id: string | null;
+    estimated_cost: number | null;
+    decided_at: string;
+  }[];
   latest_decision: PublicRoutingDecision | null;
   attempts: PublicAttemptProjection[];
+  attempt_tree: {
+    attempt_id: string;
+    execution_id: string;
+    parent_attempt_id: string | null;
+    decision_id: string;
+    status: ExecutionAttempt['status'];
+    retry_count: number;
+    verification_outcome: VerificationOutcome | null;
+    failure_code: string | null;
+    started_at: string | null;
+    completed_at: string | null;
+    cancel_requested_at: string | null;
+    cancelled_at: string | null;
+  }[];
   latest_attempt: PublicAttemptProjection | null;
   execution_id: string | null;
   retry_count: number;
