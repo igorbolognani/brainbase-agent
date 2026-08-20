@@ -1,15 +1,17 @@
 #!/usr/bin/env node
 /**
- * GPTRouter MCP HTTP Server (LOCAL DEVELOPMENT MODE)
+ * GPTRouter MCP HTTP Server
  *
- * Streamable HTTP `/mcp` endpoint using MCP TypeScript SDK v2
+ * Streamable HTTP `/mcp` endpoint using MCP TypeScript SDK v2.
  *
- * CURRENT STATE: Local development mode with localhost-only binding and
- * DNS rebinding protection. NOT configured for public deployment.
+ * Modes:
+ * - local (default): loopback bind + SDK localhost Host/Origin guards
+ * - remote: explicit bind + Host/Origin allow-lists + bearer boundary
  *
- * TODO: Implement deployment mode with explicit trusted host/origin policy,
- * proper authentication/authorization boundary, and secure public binding.
- * See Phase 0B requirements.
+ * Remote mode is intentionally fail-closed and will not start unless every
+ * required security setting is present. The bearer gate is a deployment
+ * bootstrap boundary; Phase 0E will replace/extend it with runtime identity,
+ * tenant authorization, and production token verification.
  */
 
 import { createServer } from 'node:http';
@@ -20,7 +22,6 @@ import {
   localhostOriginValidation,
 } from '@modelcontextprotocol/node';
 
-// Import shared tool logic
 import { ListModelsInput, RouteTaskInput, GetTaskInput, GetUsageInput } from './schemas.js';
 import {
   listModelsHandler,
@@ -28,12 +29,9 @@ import {
   getTaskHandler,
   getUsageHandler,
 } from './handlers.js';
+import { applyRemoteRequestBoundary, loadHttpServerConfig } from './http-config.js';
 
-// ============================================================================
-// MCP Handler Factory (per-request instance)
-// ============================================================================
-
-const handler = createMcpHandler(() => {
+function createGPTRouterMcpServer(): McpServer {
   const server = new McpServer({
     name: 'gptrouter-mcp',
     version: '0.1.0',
@@ -80,52 +78,64 @@ const handler = createMcpHandler(() => {
   );
 
   return server;
-});
+}
 
-// ============================================================================
-// HTTP Server with DNS Rebinding Protection
-// ============================================================================
-
+const config = loadHttpServerConfig();
+const handler = createMcpHandler(() => createGPTRouterMcpServer());
 const nodeHandler = toNodeHandler(handler);
-const validateHost = localhostHostValidation();
-const validateOrigin = localhostOriginValidation();
+
+const validateLocalHost = localhostHostValidation();
+const validateLocalOrigin = localhostOriginValidation();
 
 const server = createServer((req, res) => {
-  // Protect against DNS rebinding attacks
-  if (!validateHost(req, res) || !validateOrigin(req, res)) return;
+  // Parse only the request target against a fixed base. Never trust Host while
+  // deciding whether the Host header itself is admissible.
+  const url = new URL(req.url ?? '/', 'http://localhost');
+
+  if (url.pathname === '/healthz') {
+    res.statusCode = 200;
+    res.setHeader('content-type', 'application/json; charset=utf-8');
+    res.end(JSON.stringify({ status: 'ok', mode: config.mode }));
+    return;
+  }
+
+  if (url.pathname !== '/mcp') {
+    res.statusCode = 404;
+    res.setHeader('content-type', 'application/json; charset=utf-8');
+    res.end(JSON.stringify({ error: 'not_found' }));
+    return;
+  }
+
+  if (config.mode === 'local') {
+    if (!validateLocalHost(req, res) || !validateLocalOrigin(req, res)) return;
+  } else if (!applyRemoteRequestBoundary(req, res, config)) {
+    return;
+  }
+
   void nodeHandler(req, res);
 });
 
-const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
-const HOST = process.env.HOST || '127.0.0.1';
-
-server.listen(PORT, HOST, () => {
-  console.error(`GPTRouter MCP HTTP Server (LOCAL DEV) listening on http://${HOST}:${PORT}/mcp`);
-  console.error('MODE: Local development only (localhost binding + DNS rebinding protection)');
-  console.error('V0.1: Exposes safe, read-only routing tools');
+server.listen(config.port, config.host, () => {
+  console.error(
+    `GPTRouter MCP HTTP Server listening on http://${config.host}:${config.port}/mcp (${config.mode})`
+  );
+  if (config.mode === 'local') {
+    console.error('Security: loopback-only bind + localhost Host/Origin validation');
+  } else {
+    console.error('Security: explicit Host/Origin allow-lists + bearer boundary');
+  }
   console.error('Available tools: list_models, route_task, get_task, get_usage');
-  console.error('NOT CONFIGURED FOR PUBLIC DEPLOYMENT - see Phase 0B requirements');
+  console.error('route_task remains planning-only: no provider execution or spend');
 });
 
-// Graceful shutdown
-process.on('SIGINT', () => {
-  void (async () => {
-    console.error('Shutting down...');
-    await handler.close();
-    server.close(() => {
-      console.error('Server closed');
-      process.exit(0);
-    });
-  })();
-});
+async function shutdown(): Promise<void> {
+  console.error('Shutting down...');
+  await handler.close();
+  server.close(() => {
+    console.error('Server closed');
+    process.exit(0);
+  });
+}
 
-process.on('SIGTERM', () => {
-  void (async () => {
-    console.error('Shutting down...');
-    await handler.close();
-    server.close(() => {
-      console.error('Server closed');
-      process.exit(0);
-    });
-  })();
-});
+process.on('SIGINT', () => void shutdown());
+process.on('SIGTERM', () => void shutdown());
