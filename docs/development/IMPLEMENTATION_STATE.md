@@ -34,7 +34,15 @@ Original verified baseline for this sequence: `20ea09a734269aa630650180831fc8c2b
   - no `run_task`, no execution adapters, no outbound provider/gateway dispatch, no paid calls;
   - secret-like values do not appear in public tool outputs;
   - workspace test resolution maps `@gptrouter/*` packages to source so `npm test` passes without pre-existing `dist`.
-- Current full CI test inventory: 139 unique tests (contracts 6, domain 33, MCP server 35, security 65).
+- Phase 1A authorized synthetic execution is implemented and CI-verified:
+  - verified OAuth `AuthInfo` is reduced to identity claims before principal, membership, and account authorization;
+  - remote consequential execution fails closed without verified authorization and never defaults to the synthetic account;
+  - `run_task` is explicit approval plus execution with server-side budget re-check, account-scoped idempotency, and canonical attempt transitions;
+  - deterministic `SyntheticExecutor` and verifier seam perform no network or provider calls;
+  - actual synthetic usage is reconciled at zero cost exactly once per attempt and planning estimates remain separate;
+  - execution audit events are sanitized and account-scoped;
+  - MCP and dashboard surfaces expose synthetic execution as enabled while provider execution and paid calls remain disabled.
+- Current full CI test inventory: 156 unique tests (contracts 6, domain 37, MCP server 48, security 65).
 - Cost routing remains operational; unsupported quality/latency/custom ordering fails closed.
 
 ## Authentication deployment boundary
@@ -47,13 +55,14 @@ Current OpenAI developer documentation describes installable ChatGPT/Codex exten
 
 ## Current
 
-Phase 1 — minimal product orchestration.
+Phase 1B — bounded retry, fallback, and cancellation is next. Phase 1 is not complete.
 
 ## Canonical remaining order
 
 1. Phase 0G — synthetic repository-backed vertical slice (complete).
-2. Phase 1 — minimal product orchestration.
-3. Final clean verification and release-readiness review.
+2. Phase 1A — authorized synthetic execution (complete).
+3. Phase 1B — bounded retry, fallback, and cancellation (next).
+4. Final clean verification and release-readiness review.
 
 ## Completion rule
 

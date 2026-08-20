@@ -17,6 +17,7 @@ export type TaskStatus =
   'planning' | 'approved' | 'executing' | 'completed' | 'failed' | 'cancelled';
 export type ExecutionStatus =
   'pending' | 'running' | 'completed' | 'failed' | 'cancel_requested' | 'cancelled';
+export type VerificationOutcome = 'accepted' | 'retryable_failure' | 'terminal_failure';
 export type OrderingStrategy = 'cost' | 'quality' | 'latency' | 'custom';
 export type OrderingStatus = 'operational' | 'unsupported';
 
@@ -92,6 +93,17 @@ export interface AccountMembership {
   status: MembershipStatus;
   created_at: Date;
   updated_at: Date;
+}
+
+/**
+ * The only identity context accepted by consequential application services.
+ * It is produced after verified authentication and account authorization; raw
+ * access tokens are deliberately absent.
+ */
+export interface AuthorizedExecutionContext {
+  principal: Principal;
+  account: Account;
+  membership: AccountMembership;
 }
 
 // ============================================================================
@@ -298,6 +310,7 @@ export interface RetryPolicy {
 
 export interface ExecutionAttempt {
   attempt_id: string;
+  account_id: string;
   task_id: string;
   decision_id: string;
   idempotency_key: string;
@@ -308,11 +321,14 @@ export interface ExecutionAttempt {
   cancelled_at: Date | null;
   retry_count: number;
   retry_policy: RetryPolicy | null;
+  verification_outcome: VerificationOutcome | null;
+  failure_code: string | null;
   created_at: Date;
 }
 
 export interface UsageRecord {
   usage_id: string;
+  account_id: string;
   attempt_id: string;
   provider_usage_data: Record<string, unknown>;
   actual_cost: number;

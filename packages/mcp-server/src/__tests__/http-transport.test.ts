@@ -2,9 +2,15 @@ import { once } from 'node:events';
 import { request } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import {
+  OAuthError,
+  type OAuthMetadata,
+  type OAuthTokenVerifier,
+} from '@modelcontextprotocol/server';
 import { createGPTRouterHttpRuntime, type GPTRouterHttpRuntime } from '../http-app.js';
 import type { HttpServerConfig } from '../http-config.js';
 import { GPTRouterDashboardResourceUri } from '../plugin-ui.js';
+import { SYNTHETIC_ACCOUNT_ID, SYNTHETIC_ISSUER } from '../application.js';
 
 const TOKEN = '0123456789abcdef0123456789abcdef';
 
@@ -29,6 +35,33 @@ function remoteConfig(): HttpServerConfig {
     allowedHosts: ['api.example.com'],
     allowedOrigins: ['https://chatgpt.com'],
     bearerToken: TOKEN,
+  };
+}
+
+const OAUTH_METADATA: OAuthMetadata = {
+  issuer: 'https://synthetic-auth.example.com',
+  authorization_endpoint: 'https://synthetic-auth.example.com/authorize',
+  token_endpoint: 'https://synthetic-auth.example.com/token',
+  response_types_supported: ['code'],
+  scopes_supported: ['mcp'],
+};
+
+function oauthVerifier(): OAuthTokenVerifier {
+  return {
+    async verifyAccessToken(token) {
+      if (token !== TOKEN) throw new OAuthError('invalid_token', 'Synthetic token rejected');
+      return {
+        token,
+        clientId: 'synthetic-client',
+        scopes: ['mcp'],
+        expiresAt: Math.floor(Date.now() / 1000) + 3600,
+        extra: {
+          issuer: SYNTHETIC_ISSUER,
+          subject: 'principal-synthetic-v0',
+          account_id: SYNTHETIC_ACCOUNT_ID,
+        },
+      };
+    },
   };
 }
 
@@ -98,7 +131,13 @@ describe('MCP Streamable HTTP boundary', () => {
   let port: number;
 
   beforeEach(async () => {
-    runtime = createGPTRouterHttpRuntime(remoteConfig());
+    runtime = createGPTRouterHttpRuntime(remoteConfig(), {
+      oauth: {
+        verifier: oauthVerifier(),
+        oauthMetadata: OAUTH_METADATA,
+        resourceServerUrl: new URL('https://api.example.com/mcp'),
+      },
+    });
     port = await listen(runtime);
   });
 
@@ -133,8 +172,9 @@ describe('MCP Streamable HTTP boundary', () => {
       { authorization: 'Bearer wrong' }
     );
     expect(result.status).toBe(401);
-    expect(result.headers['www-authenticate']).toBe('Bearer realm="gptrouter-mcp"');
-    expect(JSON.parse(result.body)).toEqual({ error: 'invalid_token' });
+    expect(result.headers['www-authenticate']).toContain('Bearer');
+    expect(result.headers['www-authenticate']).toContain('error="invalid_token"');
+    expect(JSON.parse(result.body)).toMatchObject({ error: 'invalid_token' });
   });
 
   it('initializes through the real HTTP transport', async () => {
@@ -167,9 +207,10 @@ describe('MCP Streamable HTTP boundary', () => {
       'route_task',
       'get_task',
       'get_usage',
+      'run_task',
       'render_gptrouter_dashboard',
     ]);
-    expect(tools).not.toContain('run_task');
+    expect(tools).toContain('run_task');
   });
 
   it('exposes the GPTRouter MCP Apps resource over real HTTP', async () => {
@@ -445,10 +486,135 @@ describe('MCP Streamable HTTP boundary', () => {
     const toolNames = (toolsRpc.result as { tools: Array<{ name: string }> }).tools.map(
       (tool) => tool.name
     );
-    expect(toolNames).not.toContain('run_task');
+    expect(toolNames).toContain('run_task');
     expect(toolNames).toContain('list_models');
     expect(toolNames).toContain('route_task');
     expect(toolNames).toContain('get_task');
     expect(toolNames).toContain('get_usage');
+  });
+
+  it('runs route_task → run_task → get_task → get_usage → dashboard over authenticated HTTP', async () => {
+    const planResult = await post(port, {
+      jsonrpc: '2.0',
+      id: 'exec-plan',
+      method: 'tools/call',
+      params: {
+        name: 'route_task',
+        arguments: {
+          description: 'Authenticated synthetic execution',
+          required_capabilities: ['text'],
+          ordering_strategy: 'cost',
+        },
+      },
+    });
+    const planRpc = parseRpcBody(planResult.body);
+    const planContent = (planRpc.result as { content: Array<{ type: string; text: string }> })
+      .content;
+    const plan = JSON.parse(planContent[0].text) as {
+      task_id: string;
+      decision_id: string;
+    };
+
+    const runResult = await post(port, {
+      jsonrpc: '2.0',
+      id: 'exec-run',
+      method: 'tools/call',
+      params: {
+        name: 'run_task',
+        arguments: {
+          task_id: plan.task_id,
+          decision_id: plan.decision_id,
+          idempotency_key: 'http-synthetic-execution',
+        },
+      },
+    });
+    expect(runResult.status).toBe(200);
+    const runRpc = parseRpcBody(runResult.body);
+    expect(runRpc.error).toBeUndefined();
+    const runContent = (runRpc.result as { content: Array<{ type: string; text: string }> })
+      .content;
+    const run = JSON.parse(runContent[0].text) as {
+      status: string;
+      task_status: string;
+      execution_status: string;
+      actual_cost: number;
+    };
+    expect(run.status).toBe('completed');
+    expect(run.task_status).toBe('completed');
+    expect(run.execution_status).toBe('completed');
+    expect(run.actual_cost).toBe(0);
+
+    const getResult = await post(port, {
+      jsonrpc: '2.0',
+      id: 'exec-get',
+      method: 'tools/call',
+      params: { name: 'get_task', arguments: { task_id: plan.task_id } },
+    });
+    const getRpc = parseRpcBody(getResult.body);
+    const getContent = (getRpc.result as { content: Array<{ type: string; text: string }> })
+      .content;
+    const task = JSON.parse(getContent[0].text) as {
+      task: { status: string };
+      execution_status: string;
+      actual_cost: number;
+      attempts: Array<{ status: string }>;
+    };
+    expect(task.task.status).toBe('completed');
+    expect(task.execution_status).toBe('completed');
+    expect(task.attempts).toHaveLength(1);
+    expect(task.attempts[0].status).toBe('completed');
+    expect(task.actual_cost).toBe(0);
+
+    const usageResult = await post(port, {
+      jsonrpc: '2.0',
+      id: 'exec-usage',
+      method: 'tools/call',
+      params: { name: 'get_usage', arguments: { time_range: 'month' } },
+    });
+    const usageRpc = parseRpcBody(usageResult.body);
+    const usageContent = (usageRpc.result as { content: Array<{ type: string; text: string }> })
+      .content;
+    const usage = JSON.parse(usageContent[0].text) as {
+      execution_requests: number;
+      successful_executions: number;
+      actual_usage_records: number;
+      actual_cost: number;
+    };
+    expect(usage.execution_requests).toBe(1);
+    expect(usage.successful_executions).toBe(1);
+    expect(usage.actual_usage_records).toBe(1);
+    expect(usage.actual_cost).toBe(0);
+
+    const dashboardResult = await post(port, {
+      jsonrpc: '2.0',
+      id: 'exec-dashboard',
+      method: 'tools/call',
+      params: { name: 'render_gptrouter_dashboard', arguments: { active_page: 'tasks' } },
+    });
+    const dashboardRpc = parseRpcBody(dashboardResult.body);
+    const dashboard = (
+      dashboardRpc.result as {
+        structuredContent: {
+          runtime: {
+            execution_count: number;
+            actual_spend: number;
+            synthetic_execution_enabled: boolean;
+            provider_execution_enabled: boolean;
+            paid_calls_enabled: boolean;
+          };
+          safety: {
+            planning_only: boolean;
+            synthetic_execution_enabled: boolean;
+          };
+        };
+      }
+    ).structuredContent;
+    expect(dashboard.runtime.execution_count).toBe(1);
+    expect(dashboard.runtime.actual_spend).toBe(0);
+    expect(dashboard.runtime.synthetic_execution_enabled).toBe(true);
+    expect(dashboard.runtime.provider_execution_enabled).toBe(false);
+    expect(dashboard.runtime.paid_calls_enabled).toBe(false);
+    expect(dashboard.safety.planning_only).toBe(false);
+    expect(dashboard.safety.synthetic_execution_enabled).toBe(true);
   });
 });

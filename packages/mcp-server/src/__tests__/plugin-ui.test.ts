@@ -41,18 +41,19 @@ describe('GPTRouter MCP Apps UI', () => {
     ]);
   });
 
-  it('is explicitly synthetic, planning-only, and no-spend', () => {
+  it('is explicitly synthetic, execution-enabled, and no-spend', () => {
     const snapshot = createGPTRouterDashboardSnapshot('router');
 
     expect(snapshot.active_page).toBe('router');
     expect(snapshot.data_mode).toBe('synthetic_repository');
     expect(snapshot.safety).toEqual({
-      planning_only: true,
+      planning_only: false,
+      synthetic_execution_enabled: true,
       provider_execution_enabled: false,
       paid_calls_enabled: false,
       fixture_data: true,
     });
-    expect(snapshot.pages.tasks.items).toContain('No run_task tool is registered');
+    expect(snapshot.pages.tasks.items).toContain('run_task is explicit and idempotent');
   });
 
   it('uses the stable MCP Apps view handshake and no external asset dependency', () => {

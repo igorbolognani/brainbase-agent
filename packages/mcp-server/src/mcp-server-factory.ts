@@ -1,12 +1,22 @@
 import { McpServer } from '@modelcontextprotocol/server';
-import { ListModelsInput, RouteTaskInput, GetTaskInput, GetUsageInput } from './schemas.js';
-import { createGPTRouterHandlers } from './handlers.js';
+import {
+  GetTaskInput,
+  GetUsageInput,
+  ListModelsInput,
+  RouteTaskInput,
+  RunTaskInput,
+} from './schemas.js';
+import { authorizedContext, createGPTRouterHandlers } from './handlers.js';
 import { createSyntheticGPTRouterApplication, type GPTRouterApplication } from './application.js';
 import { registerGPTRouterDashboardUi } from './plugin-ui.js';
 
 export interface GPTRouterMcpServerOptions {
   /** Runtime-scoped authoritative application state. */
   application?: GPTRouterApplication;
+  /** Require verified account context for every account-scoped read/planning tool. */
+  requireAuthenticatedAccount?: boolean;
+  /** Require verified account context for the consequential run_task tool. */
+  requireAuthenticatedExecution?: boolean;
 }
 
 /**
@@ -18,7 +28,10 @@ export interface GPTRouterMcpServerOptions {
  */
 export function createGPTRouterMcpServer(options: GPTRouterMcpServerOptions = {}): McpServer {
   const application = options.application ?? createSyntheticGPTRouterApplication();
-  const handlers = createGPTRouterHandlers(application);
+  const handlers = createGPTRouterHandlers(application, {
+    requireAuthenticatedAccount: options.requireAuthenticatedAccount,
+    requireAuthenticatedExecution: options.requireAuthenticatedExecution,
+  });
   const server = new McpServer({
     name: 'gptrouter-mcp',
     version: '0.1.0',
@@ -30,8 +43,14 @@ export function createGPTRouterMcpServer(options: GPTRouterMcpServerOptions = {}
       description:
         'List repository-backed synthetic model routes with safe pricing/provenance projections. Read-only and no-spend.',
       inputSchema: ListModelsInput,
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
     },
-    async (args) => handlers.listModelsHandler(args)
+    async (args, context) => handlers.listModelsHandler(args, context)
   );
 
   server.registerTool(
@@ -40,8 +59,14 @@ export function createGPTRouterMcpServer(options: GPTRouterMcpServerOptions = {}
       description:
         'Plan the best route for a task using the real RoutingEngine and repository-backed synthetic state. DOES NOT execute or spend money.',
       inputSchema: RouteTaskInput,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
     },
-    async (args) => handlers.routeTaskHandler(args)
+    async (args, context) => handlers.routeTaskHandler(args, context)
   );
 
   server.registerTool(
@@ -50,8 +75,14 @@ export function createGPTRouterMcpServer(options: GPTRouterMcpServerOptions = {}
       description:
         'Retrieve a repository-backed planned task and its latest routing decision. No execution is performed.',
       inputSchema: GetTaskInput,
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
     },
-    async (args) => handlers.getTaskHandler(args)
+    async (args, context) => handlers.getTaskHandler(args, context)
   );
 
   server.registerTool(
@@ -60,12 +91,43 @@ export function createGPTRouterMcpServer(options: GPTRouterMcpServerOptions = {}
       description:
         'Get synthetic session planning estimates separately from actual provider spend, which remains zero.',
       inputSchema: GetUsageInput,
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
     },
-    async (args) => handlers.getUsageHandler(args)
+    async (args, context) => handlers.getUsageHandler(args, context)
+  );
+
+  server.registerTool(
+    'run_task',
+    {
+      title: 'Run task',
+      description:
+        'Explicitly approve and execute one planned task through the deterministic synthetic executor. This is consequential, but performs no provider or paid call.',
+      inputSchema: RunTaskInput,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    async (args, context) => handlers.runTaskHandler(args, context)
   );
 
   registerGPTRouterDashboardUi(server, {
-    getRuntimeSummary: () => application.getDashboardSummary(),
+    getRuntimeSummary: async (context) => {
+      const account = await authorizedContext(
+        application,
+        context,
+        options.requireAuthenticatedAccount ?? false,
+        'viewer'
+      );
+      return application.getDashboardSummary(account);
+    },
   });
 
   return server;

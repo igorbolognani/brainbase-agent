@@ -53,8 +53,16 @@ export function createGPTRouterHttpRuntime(
     throw new Error('OAuth resource-server mode is only valid for remote HTTP mode');
   }
 
-  const application = options.application ?? createSyntheticGPTRouterApplication();
-  const handler = createMcpHandler(() => createGPTRouterMcpServer({ application }));
+  const application =
+    options.application ??
+    createSyntheticGPTRouterApplication({ requireAuthorizedExecution: config.mode === 'remote' });
+  const handler = createMcpHandler(() =>
+    createGPTRouterMcpServer({
+      application,
+      requireAuthenticatedAccount: Boolean(options.oauth),
+      requireAuthenticatedExecution: config.mode === 'remote',
+    })
+  );
   const servedHandler = options.oauth
     ? createOAuthProtectedMcpHandler(handler, options.oauth)
     : handler;
@@ -74,7 +82,9 @@ export function createGPTRouterHttpRuntime(
           mode: config.mode,
           authentication: options.oauth ? 'oauth_resource_server' : 'bootstrap_bearer',
           data_mode: 'synthetic_repository',
+          synthetic_execution_enabled: true,
           provider_execution: 'disabled',
+          paid_calls_enabled: false,
         })
       );
       return;

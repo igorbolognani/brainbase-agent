@@ -21,8 +21,10 @@ runtime.server.listen(config.port, config.host, () => {
   } else {
     console.error('Security: explicit Host/Origin allow-lists + bearer boundary');
   }
-  console.error('Available tools: list_models, route_task, get_task, get_usage');
-  console.error('route_task remains planning-only: no provider execution or spend');
+  console.error('Available tools: list_models, route_task, run_task, get_task, get_usage');
+  console.error(
+    'Execution: deterministic synthetic enabled; provider execution and paid calls disabled'
+  );
 });
 
 async function shutdown(): Promise<void> {

@@ -12,7 +12,7 @@ async function main(): Promise<void> {
   console.error('GPTRouter MCP Server started (v2, stdio local development)');
   console.error('Data mode: repository-backed synthetic / provider execution disabled');
   console.error(
-    'Available tools: list_models, route_task, get_task, get_usage, render_gptrouter_dashboard'
+    'Available tools: list_models, route_task, run_task, get_task, get_usage, render_gptrouter_dashboard'
   );
 }
 

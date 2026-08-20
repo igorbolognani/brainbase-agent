@@ -1,6 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import type { DashboardRuntimeSummary } from './application.js';
+import type { McpToolContext } from './handlers.js';
 
 export const GPTRouterDashboardResourceUri = 'ui://gptrouter/dashboard-v1.html';
 export const GPTRouterMcpAppsProtocolVersion = '2026-01-26';
@@ -40,7 +41,8 @@ const pageDefinitions: Record<GPTRouterDashboardPageId, PageDefinition> = {
       'GPTRouter repository-backed synthetic control surface. Provider execution remains disabled.',
     items: [
       'Routing mode: lowest-cost adequate capability',
-      'Execution: disabled',
+      'Execution: deterministic synthetic executor enabled',
+      'Provider execution: disabled',
       'Remote MCP: available behind configured security boundaries',
       'Data source: authoritative synthetic repository state',
     ],
@@ -62,10 +64,11 @@ const pageDefinitions: Record<GPTRouterDashboardPageId, PageDefinition> = {
     label: 'Tasks',
     eyebrow: 'REPOSITORY STATE',
     status: 'functional_shell',
-    summary: 'Planned tasks and routing decisions persist in the synthetic runtime repository.',
+    summary:
+      'Tasks, routing decisions, attempts, and synthetic execution state persist in the synthetic runtime repository.',
     items: [
-      'No run_task tool is registered',
-      'No provider dispatch is reachable from task planning',
+      'run_task is explicit and idempotent',
+      'Synthetic execution is deterministic and no-spend',
       'get_task reads the same state written by route_task',
     ],
   },
@@ -118,11 +121,11 @@ const pageDefinitions: Record<GPTRouterDashboardPageId, PageDefinition> = {
     eyebrow: 'NO-SPEND SESSION',
     status: 'functional_shell',
     summary:
-      'Planning estimates are tracked separately from actual provider spend, which remains zero.',
+      'Planning estimates are tracked separately from reconciled synthetic actual cost, which remains zero.',
     items: [
       'Estimated planned cost is not actual cost',
-      'Actual provider executions: zero',
-      'Production usage reconciliation remains deferred',
+      'Synthetic execution actual cost: zero',
+      'Provider execution and paid calls remain disabled',
     ],
   },
   security_permissions: {
@@ -162,8 +165,14 @@ const emptyRuntimeSummary: DashboardRuntimeSummary = {
   task_count: 0,
   decision_count: 0,
   execution_count: 0,
+  successful_execution_count: 0,
+  failed_attempt_count: 0,
+  cancelled_attempt_count: 0,
   actual_spend: 0,
   estimated_planned_cost: 0,
+  synthetic_execution_enabled: true,
+  provider_execution_enabled: false,
+  paid_calls_enabled: false,
 };
 
 export interface GPTRouterDashboardSnapshot {
@@ -173,7 +182,8 @@ export interface GPTRouterDashboardSnapshot {
   active_page: GPTRouterDashboardPageId;
   navigation: Array<{ id: GPTRouterDashboardPageId; label: string; status: PageStatus }>;
   safety: {
-    planning_only: true;
+    planning_only: false;
+    synthetic_execution_enabled: true;
     provider_execution_enabled: false;
     paid_calls_enabled: false;
     fixture_data: true;
@@ -197,7 +207,8 @@ export function createGPTRouterDashboardSnapshot(
       status: pageDefinitions[id].status,
     })),
     safety: {
-      planning_only: true,
+      planning_only: false,
+      synthetic_execution_enabled: true,
       provider_execution_enabled: false,
       paid_calls_enabled: false,
       fixture_data: true,
@@ -237,7 +248,7 @@ const RenderDashboardInput = {
 };
 
 export interface GPTRouterDashboardUiOptions {
-  getRuntimeSummary?: () => Promise<DashboardRuntimeSummary>;
+  getRuntimeSummary?: (context?: McpToolContext) => Promise<DashboardRuntimeSummary>;
 }
 
 export function registerGPTRouterDashboardUi(
@@ -267,6 +278,12 @@ export function registerGPTRouterDashboardUi(
       description:
         'Render repository-backed synthetic GPTRouter state. Provider execution and paid calls remain disabled.',
       inputSchema: RenderDashboardInput,
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
       _meta: {
         ui: { resourceUri: GPTRouterDashboardResourceUri },
         'openai/outputTemplate': GPTRouterDashboardResourceUri,
@@ -274,9 +291,9 @@ export function registerGPTRouterDashboardUi(
         'openai/toolInvocation/invoked': 'GPTRouter ready.',
       },
     },
-    async ({ active_page }) => {
+    async ({ active_page }, context) => {
       const runtime = options.getRuntimeSummary
-        ? await options.getRuntimeSummary()
+        ? await options.getRuntimeSummary(context)
         : emptyRuntimeSummary;
       const dashboard = createGPTRouterDashboardSnapshot(active_page ?? 'overview', runtime);
       return {

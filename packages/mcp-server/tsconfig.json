@@ -9,9 +9,10 @@
     "baseUrl": ".",
     "paths": {
       "@gptrouter/contracts": ["../contracts/src/index.ts"],
-      "@gptrouter/domain": ["../domain/src/index.ts"]
+      "@gptrouter/domain": ["../domain/src/index.ts"],
+      "@gptrouter/security": ["../security/src/index.ts"]
     }
   },
   "include": ["src/**/*"],
-  "references": [{ "path": "../contracts" }, { "path": "../domain" }]
+  "references": [{ "path": "../contracts" }, { "path": "../domain" }, { "path": "../security" }]
 }

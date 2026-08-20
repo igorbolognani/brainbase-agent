@@ -30,7 +30,14 @@ export const GetUsageInput = z.object({
   time_range: z.enum(['today', 'week', 'month']).optional().describe('Time range for usage data'),
 });
 
+export const RunTaskInput = z.object({
+  task_id: z.string().min(1).describe('Task ID from route_task response'),
+  decision_id: z.string().min(1).describe('Routing decision ID approved for execution'),
+  idempotency_key: z.string().min(1).max(200).describe('Stable key preventing duplicate dispatch'),
+});
+
 export type ListModelsArgs = z.infer<typeof ListModelsInput>;
 export type RouteTaskArgs = z.infer<typeof RouteTaskInput>;
 export type GetTaskArgs = z.infer<typeof GetTaskInput>;
 export type GetUsageArgs = z.infer<typeof GetUsageInput>;
+export type RunTaskArgs = z.infer<typeof RunTaskInput>;

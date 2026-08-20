@@ -78,6 +78,7 @@ export interface PolicyRepository {
 
 export interface TaskRepository {
   getTask(task_id: string): Promise<Task | null>;
+  listTasks(account_id: string): Promise<Task[]>;
   createTask(task: Omit<Task, 'created_at'>): Promise<Task>;
   updateTaskStatus(task_id: string, status: Task['status']): Promise<void>;
 }
@@ -95,6 +96,7 @@ export interface ExecutionRepository {
     idempotency_key: string
   ): Promise<ExecutionAttempt | null>;
   createAttempt(attempt: Omit<ExecutionAttempt, 'created_at'>): Promise<ExecutionAttempt>;
+  listAttemptsForTask(task_id: string): Promise<ExecutionAttempt[]>;
   updateAttemptStatus(
     attempt_id: string,
     status: ExecutionAttempt['status'],
@@ -106,6 +108,7 @@ export interface UsageRepository {
   getUsage(usage_id: string): Promise<UsageRecord | null>;
   getUsageForAttempt(attempt_id: string): Promise<UsageRecord | null>;
   createUsage(usage: Omit<UsageRecord, 'reconciled_at'>): Promise<UsageRecord>;
+  listUsageForAccount(account_id: string): Promise<UsageRecord[]>;
   getDailySpending(account_id: string): Promise<number>;
   getMonthlySpending(account_id: string): Promise<number>;
 }

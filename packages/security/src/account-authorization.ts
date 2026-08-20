@@ -1,7 +1,6 @@
 import type {
-  Account,
-  AccountMembership,
   AccountRepository,
+  AuthorizedExecutionContext,
   MembershipRepository,
   MembershipRole,
   Principal,
@@ -23,11 +22,7 @@ export class AuthorizationError extends Error {
   }
 }
 
-export interface AuthorizedAccountContext {
-  principal: Principal;
-  account: Account;
-  membership: AccountMembership;
-}
+export type AuthorizedAccountContext = AuthorizedExecutionContext;
 
 export interface AccountAuthorizationServiceDeps {
   accounts: Pick<AccountRepository, 'getAccount'>;
