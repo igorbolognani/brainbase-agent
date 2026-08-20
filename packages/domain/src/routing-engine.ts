@@ -17,6 +17,7 @@ import type {
   RejectionReasonCode,
   BudgetCheckResult,
   RoutePerformanceMetadata,
+  Connection,
 } from '@gptrouter/contracts';
 import { generateId } from './utils.js';
 
@@ -28,6 +29,11 @@ export interface RoutingEngineDependencies {
   ) => Promise<BudgetCheckResult>;
   estimateCost: (route: ModelRoute, task: Task) => number;
   getPerformanceMetadata?: (route_id: string) => Promise<RoutePerformanceMetadata | null>;
+  /**
+   * Resolve persisted provider/gateway metadata by opaque connection ID.
+   * Required only for policies whose admissibility depends on connection-owned data.
+   */
+  getConnection?: (connection_id: string) => Promise<Connection | null>;
 }
 
 export class RoutingEngine {
@@ -84,7 +90,7 @@ export class RoutingEngine {
   }
 
   /**
-   * Validate a manual route override against admissibility criteria
+   * Validate a manual route override against the same admissibility criteria as automatic routing.
    */
   async validateManualOverride(
     route: ModelRoute,
@@ -143,8 +149,8 @@ export class RoutingEngine {
           };
         }
 
-        // Check ALL policy constraints
-        const policyCheck = this.satisfiesPolicy(route, policy);
+        // Check ALL policy constraints, including connection-owned security metadata.
+        const policyCheck = await this.satisfiesPolicy(route, policy, task.account_id);
         if (!policyCheck.satisfied) {
           return {
             route,
@@ -178,10 +184,11 @@ export class RoutingEngine {
     return required.every((cap) => route.capabilities.includes(cap));
   }
 
-  private satisfiesPolicy(
+  private async satisfiesPolicy(
     route: ModelRoute,
-    policy: RoutingPolicy
-  ): { satisfied: boolean; reason?: string; reason_code?: RejectionReasonCode } {
+    policy: RoutingPolicy,
+    accountId: string
+  ): Promise<{ satisfied: boolean; reason?: string; reason_code?: RejectionReasonCode }> {
     const rules = policy.admissibility_rules;
 
     // Check allowed route types
@@ -259,19 +266,66 @@ export class RoutingEngine {
       }
     }
 
-    // Security: check HTTPS requirement for gateways
+    // Security: HTTPS is connection-owned configuration, not duplicated onto ModelRoute.
     if (route.route_type === 'gateway' && rules.require_https) {
-      // TODO: Implement actual HTTPS enforcement with gateway connection metadata
-      // V0.1: Fail closed - reject gateway routes when require_https is enabled
-      // until connection metadata integration is complete
-      return {
-        satisfied: false,
-        reason_code: 'policy_violation_security',
-        reason: 'HTTPS enforcement requires gateway connection metadata (not yet integrated)',
-      };
+      const connectionCheck = await this.validateGatewayConnectionForHttps(route, accountId);
+      if (!connectionCheck.satisfied) return connectionCheck;
     }
 
     return { satisfied: true };
+  }
+
+  private async validateGatewayConnectionForHttps(
+    route: ModelRoute,
+    accountId: string
+  ): Promise<{ satisfied: boolean; reason?: string; reason_code?: RejectionReasonCode }> {
+    if (!this.deps.getConnection) {
+      return this.securityRejection('Gateway connection metadata resolver is unavailable');
+    }
+
+    const connection = await this.deps.getConnection(route.connection_id);
+    if (!connection) {
+      return this.securityRejection('Gateway connection metadata is missing');
+    }
+
+    if (connection.type !== 'gateway') {
+      return this.securityRejection('Route connection is not a gateway connection');
+    }
+
+    if (connection.account_id !== accountId) {
+      return this.securityRejection('Gateway connection does not belong to the task account');
+    }
+
+    if (connection.status !== 'active') {
+      return this.securityRejection(`Gateway connection is ${connection.status}`);
+    }
+
+    let gatewayUrl: URL;
+    try {
+      gatewayUrl = new URL(connection.gateway_url);
+    } catch {
+      return this.securityRejection('Gateway URL is invalid');
+    }
+
+    if (gatewayUrl.protocol !== 'https:') {
+      return this.securityRejection('Gateway URL must use HTTPS');
+    }
+
+    if (gatewayUrl.username || gatewayUrl.password) {
+      return this.securityRejection('Gateway URL must not contain credentials');
+    }
+
+    return { satisfied: true };
+  }
+
+  private securityRejection(
+    reason: string
+  ): { satisfied: false; reason: string; reason_code: RejectionReasonCode } {
+    return {
+      satisfied: false,
+      reason_code: 'policy_violation_security',
+      reason,
+    };
   }
 
   private getBudgetRejectionCode(budgetCheck: BudgetCheckResult): RejectionReasonCode {
