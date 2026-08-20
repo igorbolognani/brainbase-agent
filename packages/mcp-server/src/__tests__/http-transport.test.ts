@@ -4,6 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createGPTRouterHttpRuntime, type GPTRouterHttpRuntime } from '../http-app.js';
 import type { HttpServerConfig } from '../http-config.js';
+import { GPTRouterDashboardResourceUri } from '../plugin-ui.js';
 
 const TOKEN = '0123456789abcdef0123456789abcdef';
 
@@ -161,8 +162,67 @@ describe('MCP Streamable HTTP boundary', () => {
     expect(rpc.error).toBeUndefined();
 
     const tools = (rpc.result as { tools: Array<{ name: string }> }).tools.map((tool) => tool.name);
-    expect(tools).toEqual(['list_models', 'route_task', 'get_task', 'get_usage']);
+    expect(tools).toEqual([
+      'list_models',
+      'route_task',
+      'get_task',
+      'get_usage',
+      'render_gptrouter_dashboard',
+    ]);
     expect(tools).not.toContain('run_task');
+  });
+
+  it('exposes the GPTRouter MCP Apps resource over real HTTP', async () => {
+    const listResult = await post(port, { jsonrpc: '2.0', id: 4, method: 'resources/list' });
+    expect(listResult.status).toBe(200);
+    const listed = parseRpcBody(listResult.body);
+    expect(listed.error).toBeUndefined();
+    expect(
+      (listed.result as { resources: Array<{ uri: string }> }).resources.map((resource) => resource.uri)
+    ).toContain(GPTRouterDashboardResourceUri);
+
+    const readResult = await post(port, {
+      jsonrpc: '2.0',
+      id: 5,
+      method: 'resources/read',
+      params: { uri: GPTRouterDashboardResourceUri },
+    });
+    expect(readResult.status).toBe(200);
+    const read = parseRpcBody(readResult.body);
+    expect(read.error).toBeUndefined();
+    const resource = (read.result as {
+      contents: Array<{ uri: string; mimeType: string; text: string }>;
+    }).contents[0];
+    expect(resource.uri).toBe(GPTRouterDashboardResourceUri);
+    expect(resource.mimeType).toBe('text/html;profile=mcp-app');
+    expect(resource.text).toContain('Synthetic / no-spend');
+  });
+
+  it('renders the dashboard as structured synthetic no-spend state', async () => {
+    const result = await post(port, {
+      jsonrpc: '2.0',
+      id: 6,
+      method: 'tools/call',
+      params: {
+        name: 'render_gptrouter_dashboard',
+        arguments: { active_page: 'router' },
+      },
+    });
+
+    expect(result.status).toBe(200);
+    const rpc = parseRpcBody(result.body);
+    expect(rpc.error).toBeUndefined();
+    const structured = (rpc.result as {
+      structuredContent: {
+        active_page: string;
+        data_mode: string;
+        safety: { provider_execution_enabled: boolean; paid_calls_enabled: boolean };
+      };
+    }).structuredContent;
+    expect(structured.active_page).toBe('router');
+    expect(structured.data_mode).toBe('synthetic');
+    expect(structured.safety.provider_execution_enabled).toBe(false);
+    expect(structured.safety.paid_calls_enabled).toBe(false);
   });
 
   it('calls route_task over HTTP and proves the slice remains planning-only', async () => {

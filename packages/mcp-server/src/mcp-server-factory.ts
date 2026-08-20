@@ -6,12 +6,13 @@ import {
   getTaskHandler,
   getUsageHandler,
 } from './handlers.js';
+import { registerGPTRouterDashboardUi } from './plugin-ui.js';
 
 /**
  * Build one stateless GPTRouter MCP server instance.
  *
- * Both stdio and HTTP transports use this factory so tool registration cannot
- * drift between local development and remote deployment adapters.
+ * Both stdio and HTTP transports use this factory so tool/resource registration
+ * cannot drift between local development and remote deployment adapters.
  */
 export function createGPTRouterMcpServer(): McpServer {
   const server = new McpServer({
@@ -58,6 +59,8 @@ export function createGPTRouterMcpServer(): McpServer {
     },
     getUsageHandler
   );
+
+  registerGPTRouterDashboardUi(server);
 
   return server;
 }
