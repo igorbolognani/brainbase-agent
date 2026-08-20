@@ -14,7 +14,7 @@ Original verified baseline for this sequence: `20ea09a734269aa630650180831fc8c2b
   - local mode is loopback-only;
   - remote mode fails closed without explicit bind/Host/Origin/auth configuration;
   - Host and exact HTTPS Origin are validated before MCP dispatch;
-  - a bootstrap bearer boundary is enforced before MCP dispatch;
+  - a bootstrap bearer boundary is available for controlled deployment bring-up;
   - real HTTP tests prove initialize, tools/list, and route_task tools/call;
   - route_task remains planning-only with no provider execution or spend.
 - Phase 0D safe outbound gateway dispatch is implemented and CI-verified:
@@ -26,25 +26,32 @@ Original verified baseline for this sequence: `20ea09a734269aa630650180831fc8c2b
   - redirects are handled manually, every same-origin hop re-enters DNS validation, and cross-origin redirects fail closed in V0.1;
   - redirect count, total timeout, and response-size limits are enforced;
   - tests cover private/loopback/mapped addresses, mixed DNS answers, simulated rebinding, redirects, timeout, and a safe synthetic request.
-- Current full CI test inventory: 89 tests (contracts 6, domain 20, MCP server 26, security 37).
+- Phase 0E runtime tenant and secret boundaries are implemented and CI-verified:
+  - Principal / AccountMembership repository contracts support server-side identity-to-tenant lookup;
+  - AccountAuthorizationService requires active same-account membership and enforces role hierarchy;
+  - missing, suspended, revoked, cross-account, wrong-principal, and insufficient-role access fail closed with a uniform public error;
+  - explicit public connection projections omit credential references and account internals;
+  - dynamic public-output serialization drops or redacts authorization headers, cookies, passwords, API/access/refresh tokens, credential references, vault paths, and other secret-bearing keys;
+  - remote OAuth resource-server mode publishes protected-resource metadata, gates MCP calls through an injected OAuthTokenVerifier, enforces scopes, and passes only verified AuthInfo to the canonical MCP handler;
+  - the Phase 0B static bearer remains explicitly a bootstrap alternative rather than final user authentication.
+- Current full CI test inventory: 122 unique tests (contracts 6, domain 20, MCP server 31, security 65).
 - Cost routing remains operational; unsupported quality/latency/custom ordering fails closed.
 
-## Important authentication boundary
+## Authentication deployment boundary
 
-Phase 0B proves a secure deployment gate, not final ChatGPT user authentication. The static bearer boundary is temporary bootstrap infrastructure. Production OAuth/OIDC token verification, Principal -> AccountMembership -> Account authorization, tenant isolation, and output/log secret boundaries remain Phase 0E work and must follow current official MCP/OpenAI requirements.
+The repository now provides the standards-shaped OAuth resource-server boundary and tenant authorization service. A deployment must still provide a concrete OAuth/OIDC access-token verifier configured for its chosen authorization server, including issuer/audience/resource validation as required by that verifier. GPTRouter does not issue access tokens and does not pass provider/gateway credentials through MCP.
 
 ## Current
 
-Phase 0E — runtime authentication, tenant authorization, and secret-output boundaries.
+Phase 0C — connection-metadata-aware HTTPS routing.
 
 ## Canonical remaining order
 
-1. Phase 0E — runtime auth/tenancy/secrets.
-2. Phase 0C — connection-metadata-aware HTTPS routing.
-3. Phase 0F — Apps SDK/MCP UI.
-4. Phase 0G — synthetic repository-backed vertical slice.
-5. Phase 1 — minimal product orchestration.
-6. Final clean verification and release-readiness review.
+1. Phase 0C — connection-metadata-aware HTTPS routing.
+2. Phase 0F — Apps SDK/MCP UI.
+3. Phase 0G — synthetic repository-backed vertical slice.
+4. Phase 1 — minimal product orchestration.
+5. Final clean verification and release-readiness review.
 
 ## Completion rule
 
