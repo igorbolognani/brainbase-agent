@@ -17,6 +17,7 @@ import type {
   RejectionReasonCode,
   BudgetCheckResult,
   RoutePerformanceMetadata,
+  Connection,
 } from '@gptrouter/contracts';
 import { generateId } from './utils.js';
 
@@ -28,6 +29,11 @@ export interface RoutingEngineDependencies {
   ) => Promise<BudgetCheckResult>;
   estimateCost: (route: ModelRoute, task: Task) => number;
   getPerformanceMetadata?: (route_id: string) => Promise<RoutePerformanceMetadata | null>;
+  /**
+   * Resolve persisted provider/gateway metadata by opaque connection ID.
+   * Required only for policies whose admissibility depends on connection-owned data.
+   */
+  getConnection?: (connection_id: string) => Promise<Connection | null>;
 }
 
 export class RoutingEngine {
@@ -41,24 +47,16 @@ export class RoutingEngine {
     policy: RoutingPolicy,
     availableRoutes: ModelRoute[]
   ): Promise<RoutingDecision> {
-    // Stage 1: Admissibility Filter
     const admissibilityResults = await this.evaluateAdmissibility(availableRoutes, task, policy);
-
     const admissibleRoutes = admissibilityResults.filter((r) => r.admissible).map((r) => r.route);
-
-    // Stage 2: Ordering
     const orderedRoutes = await this.orderRoutes(admissibleRoutes, policy, task);
 
-    // Check if ordering strategy is unsupported (empty result despite admissible routes)
     const orderingUnsupported =
       admissibleRoutes.length > 0 &&
       orderedRoutes.length === 0 &&
       ['quality', 'latency', 'custom'].includes(policy.ordering_strategy);
 
-    // Select top route (or null if none admissible or strategy unsupported)
     const selectedRoute = orderedRoutes[0] || null;
-
-    // Build rejection reasons for non-admissible routes
     const rejectionReasons: RejectionReason[] = admissibilityResults
       .filter((r) => !r.admissible)
       .map((r) => ({
@@ -83,9 +81,7 @@ export class RoutingEngine {
     };
   }
 
-  /**
-   * Validate a manual route override against admissibility criteria
-   */
+  /** Validate a manual route override against the same admissibility criteria. */
   async validateManualOverride(
     route: ModelRoute,
     task: Task,
@@ -95,19 +91,10 @@ export class RoutingEngine {
       return { valid: false, reason: 'Manual override not allowed by policy' };
     }
 
-    const results = await this.evaluateAdmissibility([route], task, policy);
-    const result = results[0];
-
-    if (!result.admissible) {
-      return { valid: false, reason: result.details };
-    }
-
+    const [result] = await this.evaluateAdmissibility([route], task, policy);
+    if (!result.admissible) return { valid: false, reason: result.details };
     return { valid: true };
   }
-
-  // ========================================================================
-  // Private: Admissibility Filter (ENFORCES ALL POLICY CONSTRAINTS)
-  // ========================================================================
 
   private async evaluateAdmissibility(
     routes: ModelRoute[],
@@ -121,9 +108,8 @@ export class RoutingEngine {
       details?: string;
     }>
   > {
-    const results = await Promise.all(
+    return await Promise.all(
       routes.map(async (route) => {
-        // Check capability match
         if (!this.hasRequiredCapabilities(route, task.requirements.capabilities)) {
           return {
             route,
@@ -133,7 +119,6 @@ export class RoutingEngine {
           };
         }
 
-        // Check availability
         if (route.availability_status !== 'available') {
           return {
             route,
@@ -143,8 +128,7 @@ export class RoutingEngine {
           };
         }
 
-        // Check ALL policy constraints
-        const policyCheck = this.satisfiesPolicy(route, policy);
+        const policyCheck = await this.satisfiesPolicy(route, policy, task.account_id);
         if (!policyCheck.satisfied) {
           return {
             route,
@@ -154,7 +138,6 @@ export class RoutingEngine {
           };
         }
 
-        // Check budget
         const estimatedCost = this.deps.estimateCost(route, task);
         const budgetCheck = await this.deps.checkBudget(task.account_id, estimatedCost, policy);
         if (!budgetCheck.allowed) {
@@ -166,25 +149,22 @@ export class RoutingEngine {
           };
         }
 
-        // All checks passed
         return { route, admissible: true };
       })
     );
-
-    return results;
   }
 
   private hasRequiredCapabilities(route: ModelRoute, required: string[]): boolean {
     return required.every((cap) => route.capabilities.includes(cap));
   }
 
-  private satisfiesPolicy(
+  private async satisfiesPolicy(
     route: ModelRoute,
-    policy: RoutingPolicy
-  ): { satisfied: boolean; reason?: string; reason_code?: RejectionReasonCode } {
+    policy: RoutingPolicy,
+    accountId: string
+  ): Promise<{ satisfied: boolean; reason?: string; reason_code?: RejectionReasonCode }> {
     const rules = policy.admissibility_rules;
 
-    // Check allowed route types
     if (rules.allowed_route_types && !rules.allowed_route_types.includes(route.route_type)) {
       return {
         satisfied: false,
@@ -193,7 +173,6 @@ export class RoutingEngine {
       };
     }
 
-    // For provider routes: check provider allow/block lists
     if (route.route_type === 'provider' && route.source_provider) {
       if (rules.blocked_providers?.includes(route.source_provider)) {
         return {
@@ -202,7 +181,6 @@ export class RoutingEngine {
           reason: `Provider ${route.source_provider} is blocked`,
         };
       }
-
       if (rules.allowed_providers && !rules.allowed_providers.includes(route.source_provider)) {
         return {
           satisfied: false,
@@ -212,7 +190,6 @@ export class RoutingEngine {
       }
     }
 
-    // For gateway routes: check gateway allow/block lists
     if (route.route_type === 'gateway' && route.source_gateway) {
       if (rules.blocked_gateways?.includes(route.source_gateway)) {
         return {
@@ -221,7 +198,6 @@ export class RoutingEngine {
           reason: `Gateway ${route.source_gateway} is blocked`,
         };
       }
-
       if (rules.allowed_gateways && !rules.allowed_gateways.includes(route.source_gateway)) {
         return {
           satisfied: false,
@@ -231,7 +207,6 @@ export class RoutingEngine {
       }
     }
 
-    // Check required capabilities (already checked in admissibility but policy may have extras)
     if (rules.required_capabilities) {
       const missing = rules.required_capabilities.filter(
         (cap: string) => !route.capabilities.includes(cap)
@@ -245,7 +220,6 @@ export class RoutingEngine {
       }
     }
 
-    // Check excluded capabilities
     if (rules.excluded_capabilities) {
       const hasExcluded = rules.excluded_capabilities.some((cap: string) =>
         route.capabilities.includes(cap)
@@ -259,33 +233,69 @@ export class RoutingEngine {
       }
     }
 
-    // Security: check HTTPS requirement for gateways
     if (route.route_type === 'gateway' && rules.require_https) {
-      // TODO: Implement actual HTTPS enforcement with gateway connection metadata
-      // V0.1: Fail closed - reject gateway routes when require_https is enabled
-      // until connection metadata integration is complete
-      return {
-        satisfied: false,
-        reason_code: 'policy_violation_security',
-        reason: 'HTTPS enforcement requires gateway connection metadata (not yet integrated)',
-      };
+      const connectionCheck = await this.validateGatewayConnectionForHttps(route, accountId);
+      if (!connectionCheck.satisfied) return connectionCheck;
     }
 
     return { satisfied: true };
   }
 
+  private async validateGatewayConnectionForHttps(
+    route: ModelRoute,
+    accountId: string
+  ): Promise<{ satisfied: boolean; reason?: string; reason_code?: RejectionReasonCode }> {
+    if (!this.deps.getConnection) {
+      return this.securityRejection('Gateway connection metadata resolver is unavailable');
+    }
+
+    const connection = await this.deps.getConnection(route.connection_id);
+    if (!connection) return this.securityRejection('Gateway connection metadata is missing');
+    if (connection.type !== 'gateway') {
+      return this.securityRejection('Route connection is not a gateway connection');
+    }
+    if (connection.account_id !== accountId) {
+      return this.securityRejection('Gateway connection does not belong to the task account');
+    }
+    if (connection.status !== 'active') {
+      return this.securityRejection(`Gateway connection is ${connection.status}`);
+    }
+
+    let gatewayUrl: URL;
+    try {
+      gatewayUrl = new URL(connection.gateway_url);
+    } catch {
+      return this.securityRejection('Gateway URL is invalid');
+    }
+
+    if (gatewayUrl.protocol !== 'https:')
+      return this.securityRejection('Gateway URL must use HTTPS');
+    if (gatewayUrl.username || gatewayUrl.password) {
+      return this.securityRejection('Gateway URL must not contain credentials');
+    }
+
+    return { satisfied: true };
+  }
+
+  private securityRejection(reason: string): {
+    satisfied: false;
+    reason: string;
+    reason_code: RejectionReasonCode;
+  } {
+    return {
+      satisfied: false,
+      reason_code: 'policy_violation_security',
+      reason,
+    };
+  }
+
   private getBudgetRejectionCode(budgetCheck: BudgetCheckResult): RejectionReasonCode {
-    // Infer reason code from budget check details
     const reason = budgetCheck.reason?.toLowerCase() || '';
     if (reason.includes('daily')) return 'budget_exceeded_daily';
     if (reason.includes('monthly')) return 'budget_exceeded_monthly';
     if (reason.includes('route class')) return 'budget_exceeded_route_class';
     return 'budget_exceeded_per_task';
   }
-
-  // ========================================================================
-  // Private: Ordering (V0.1: Only cost is operational)
-  // ========================================================================
 
   private async orderRoutes(
     routes: ModelRoute[],
@@ -296,27 +306,17 @@ export class RoutingEngine {
 
     switch (policy.ordering_strategy) {
       case 'cost':
-        // Operational: sort by estimated cost (ascending)
         return routesCopy.sort(
           (a, b) => this.deps.estimateCost(a, task) - this.deps.estimateCost(b, task)
         );
-
       case 'quality':
       case 'latency':
       case 'custom':
-        // V0.1: Unsupported strategies - fail closed
-        // Do NOT silently execute a different strategy
-        // Caller must handle empty result indicating unsupported strategy
         return [];
-
       default:
         return routesCopy;
     }
   }
-
-  // ========================================================================
-  // Private: Utilities
-  // ========================================================================
 
   private snapshotRoute(route: ModelRoute, policy_version: number): RouteSnapshot {
     return {

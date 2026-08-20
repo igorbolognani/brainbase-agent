@@ -1,40 +1,42 @@
 # Next Task
 
-## Phase 0C — Connection-Metadata-Aware HTTPS Routing
+## Phase 0F — Apps SDK / MCP UI
 
-Replace the temporary blanket gateway rejection under `require_https` with a real admissibility check against the selected route's persisted connection metadata.
+Add the first real GPTRouter app surface inside ChatGPT using the current OpenAI Apps SDK / MCP app resource pattern. The UI is a projection and control surface over canonical GPTRouter state; it must not become a second authoritative store.
 
 ### Required
 
-- Keep `route_task` planning-only and no-spend.
-- Resolve each gateway route's `connection_id` to a `GatewayConnection` owned by the same account as the task/policy context.
-- When `require_https` is enabled, accept a gateway route only when its resolved connection has a syntactically valid HTTPS `gateway_url` with no URL credentials.
-- Fail closed when gateway connection metadata is missing, inactive, mismatched by type, or belongs to another account.
-- Do not require gateway metadata for provider routes.
-- Keep provider/gateway allow/block policies unchanged.
-- Apply the exact same admissibility path to manual overrides; no bypass.
-- Do not duplicate endpoint metadata onto `ModelRoute`; `connection_id` remains the reference to connection-owned configuration.
-- Do not perform any outbound provider/gateway request as part of planning.
+- Verify the current official OpenAI Apps SDK documentation before implementation and use its current MCP resource/tool metadata conventions.
+- Keep one GPTRouter App with one coherent navigation model.
+- Add an actual widget/UI package or equivalent buildable UI module and integrate its resource with the MCP server.
+- Include all canonical navigation items: Overview, Router, Tasks, Engineering, Models, Providers & Connections, Model Gateways / Proxies, Usage & Budgets, Security & Permissions, Activity / Audit, Settings.
+- Make Overview, Router, Tasks, Providers & Connections, Model Gateways / Proxies, and a compact Engineering shell useful in the first slice.
+- Remaining pages may be truthful placeholders but must be clearly labeled as not yet implemented.
+- Render only canonical/safe DTO projections; do not expose credential references, vault paths, bearer tokens, raw provider keys, account internals, or unsafe gateway URL details.
+- Use clearly labeled synthetic/local fixture state until Phase 0G repository-backed data is wired.
+- Project `route_task` planning results into the UI without executing or spending provider money.
+- Preserve chat as the main interaction surface; the widget is state/control/observability rather than a generic workflow builder.
+- Keep the Engineering page executor-agnostic. Do not recreate OpenCode/Codex/Brainbase UI.
+- No paid provider calls.
 
 ### Required tests
 
-- HTTPS gateway accepted when `require_https` is enabled and same-account active metadata exists;
-- HTTP gateway rejected;
-- URL userinfo rejected;
-- missing connection rejected;
-- wrong connection type rejected;
-- revoked/expired/error connection rejected;
-- cross-account connection rejected;
-- provider route remains admissible without gateway metadata;
-- manual override follows the same HTTPS/connection checks;
-- planning never invokes an execution/outbound adapter.
+- all canonical navigation entries render;
+- functional priority pages render their expected safe projections;
+- placeholders are visibly labeled;
+- synthetic/mock state is visibly labeled;
+- UI resource metadata and tool-to-widget linkage match current official Apps SDK conventions;
+- `route_task` structured output can be projected without a second authoritative state model;
+- hostile secret-like fixture values do not appear in rendered/public UI output;
+- no provider execution adapter is invoked by UI smoke tests.
 
 ### Do not implement yet
 
-- Paid provider execution.
-- Apps SDK UI.
-- Generic workflow builder.
+- Real paid provider execution.
+- Generic workflow/node editor.
+- Private/local gateway bridge.
+- Full Phase 1 orchestration.
 
 ### Exit gate
 
-Full deterministic CI plus targeted connection-aware routing tests must be green before Phase 0F UI work.
+Full deterministic CI plus UI/resource/navigation/secret-boundary smoke tests must be green before Phase 0G repository-backed vertical-slice work.

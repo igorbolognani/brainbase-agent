@@ -79,7 +79,6 @@ describe('RoutingEngine Fail-Closed Behavior', () => {
       const engine = new RoutingEngine(mockDeps);
       const decision = await engine.planRoute(mockTask, policy, [mockRoute]);
 
-      // Should have admissible routes but NO selected route
       expect(decision.admissible_routes).toHaveLength(1);
       expect(decision.selected_route_id).toBeNull();
       expect(decision.ordering_strategy_unsupported).toBe(true);
@@ -117,19 +116,18 @@ describe('RoutingEngine Fail-Closed Behavior', () => {
   });
 
   describe('HTTPS Requirement Fail-Closed', () => {
-    it('rejects gateway routes when require_https is enabled', async () => {
+    it('rejects gateway routes when HTTPS metadata resolution is unavailable', async () => {
       const policy = createTestPolicy({
         admissibility_rules: { require_https: true },
       });
       const engine = new RoutingEngine(mockDeps);
       const decision = await engine.planRoute(mockTask, policy, [mockGatewayRoute]);
 
-      // Gateway route should be rejected due to HTTPS requirement
       expect(decision.admissible_routes).toHaveLength(0);
       expect(decision.selected_route_id).toBeNull();
       expect(decision.rejection_reasons).toHaveLength(1);
       expect(decision.rejection_reasons[0].reason_code).toBe('policy_violation_security');
-      expect(decision.rejection_reasons[0].details).toContain('HTTPS enforcement');
+      expect(decision.rejection_reasons[0].details).toContain('resolver');
     });
 
     it('allows provider routes when require_https is enabled', async () => {
@@ -139,7 +137,6 @@ describe('RoutingEngine Fail-Closed Behavior', () => {
       const engine = new RoutingEngine(mockDeps);
       const decision = await engine.planRoute(mockTask, policy, [mockRoute]);
 
-      // Provider route should pass (HTTPS check only applies to gateways)
       expect(decision.admissible_routes).toHaveLength(1);
       expect(decision.selected_route_id).toBe('route-1');
     });
