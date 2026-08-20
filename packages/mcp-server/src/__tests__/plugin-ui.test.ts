@@ -24,7 +24,11 @@ describe('GPTRouter MCP Apps UI', () => {
       'Activity / Audit',
       'Settings',
     ]);
-    expect(snapshot.navigation.filter((item) => item.status === 'functional_shell').map((item) => item.id)).toEqual([
+    expect(
+      snapshot.navigation
+        .filter((item) => item.status === 'functional_shell')
+        .map((item) => item.id)
+    ).toEqual([
       'overview',
       'router',
       'tasks',
