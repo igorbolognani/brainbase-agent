@@ -1,39 +1,37 @@
 # Next Task
 
-## Phase 0D — Safe Gateway Dispatch / SSRF Boundary
+## Phase 0E — Runtime Auth / Tenancy / Secret Boundaries
 
-Implement the actual outbound HTTP request abstraction for user-configured gateway calls. The existing `GatewayValidator` is preflight-only and is not sufficient at dispatch time.
+Turn the existing Principal / AccountMembership / Account types into enforceable runtime service boundaries and ensure model-visible, MCP, log, and audit outputs cannot leak credentials or internal vault references.
 
 ### Required
 
-- HTTPS only.
-- Parse and canonicalize IPv4, IPv6, and IPv4-mapped IPv6 safely.
-- Resolve all DNS answers and reject the target if any answer is loopback, private, link-local, multicast/reserved as applicable, or cloud-metadata sensitive.
-- Re-resolve and revalidate immediately at dispatch to reduce DNS rebinding / TOCTOU exposure.
-- Own redirect handling explicitly; do not rely on automatic redirects.
-- Revalidate every redirect target before following it.
-- Enforce a small redirect cap.
-- Enforce a total timeout with AbortSignal/AbortController.
-- Do not forward credentials across an origin change unless a later explicit policy permits it; V0.1 should fail closed.
-- Return structured safe errors without leaking credentials or internal addresses unnecessarily.
+- Keep app authentication separate from provider/gateway credentials.
+- Add a runtime authorization service that resolves a Principal to an active AccountMembership for the requested Account.
+- Deny missing, suspended, revoked, or cross-account membership.
+- Support role requirements without trusting client-supplied account ownership claims.
+- Add explicit safe projection/serialization helpers for model-visible/MCP/log/audit data.
+- Do not expose raw API keys, bearer tokens, passwords, secret values, Authorization/Cookie headers, or internal credential/vault paths.
+- Where a public response needs connection identity, expose opaque connection ID plus safe status/metadata only.
+- Keep the Phase 0B static bearer gate labeled as bootstrap transport protection; do not falsely present it as final user auth.
+- Preserve provider auth extensibility: OAuth and secure server-side secret setup are both valid provider connection methods.
 
 ### Required tests
 
-- direct loopback/private target rejected;
-- unsafe IPv6 and IPv4-mapped IPv6 rejected;
-- mixed DNS answers fail closed when any answer is unsafe;
-- simulated public-to-private redirect rejected;
-- redirect limit enforced;
-- timeout aborts request;
-- simulated re-resolution/rebinding from public to private rejected before dispatch;
-- safe synthetic public request path succeeds without calling a paid provider.
+- active same-account membership succeeds;
+- cross-account access denied;
+- suspended/revoked membership denied;
+- insufficient role denied;
+- hostile nested secret-like fixtures are redacted or rejected at each public projection boundary;
+- credential references/vault paths do not reach model-visible/MCP projections;
+- authorization failures do not leak whether a foreign account/resource exists.
 
 ### Do not implement yet
 
-- Real paid provider execution.
-- Private/local network bridge.
-- Final tenant authorization or Apps SDK UI.
+- Paid provider execution.
+- Apps SDK UI.
+- Generic workflow builder.
 
 ### Exit gate
 
-The full deterministic CI gate plus targeted SSRF/dispatch tests must be green before moving to Phase 0E.
+Full deterministic CI plus targeted authorization/secret-boundary tests must be green before Phase 0C routing/HTTPS completion.

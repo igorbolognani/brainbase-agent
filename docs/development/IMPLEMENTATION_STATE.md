@@ -7,35 +7,44 @@ Original verified baseline for this sequence: `20ea09a734269aa630650180831fc8c2b
 ## Green
 
 - Phase 0A verification truth restored.
-- Deterministic GitHub Actions CI now enforces install, formatting, lint, typecheck, tests, clean build, audit, and generated-output hygiene.
+- Deterministic GitHub Actions CI enforces install, formatting, lint, typecheck, tests, clean build, audit, and generated-output hygiene.
 - MCP TypeScript SDK v2 structure is shared by stdio and HTTP adapters.
 - Phase 0B remote MCP transport boundary is implemented and CI-verified:
   - explicit local vs remote deployment modes;
   - local mode is loopback-only;
   - remote mode fails closed without explicit bind/Host/Origin/auth configuration;
-  - Host and Origin are validated before MCP dispatch;
+  - Host and exact HTTPS Origin are validated before MCP dispatch;
   - a bootstrap bearer boundary is enforced before MCP dispatch;
   - real HTTP tests prove initialize, tools/list, and route_task tools/call;
   - route_task remains planning-only with no provider execution or spend.
+- Phase 0D safe outbound gateway dispatch is implemented and CI-verified:
+  - HTTPS-only target URLs and no URL userinfo;
+  - byte-aware IPv4/IPv6 safety classification, including IPv4-mapped IPv6;
+  - all DNS answers are checked and any unsafe answer fails closed;
+  - DNS is resolved again immediately before each outbound transport hop;
+  - the default HTTPS transport pins socket lookup to a validated address while preserving the original hostname/SNI;
+  - redirects are handled manually, every same-origin hop re-enters DNS validation, and cross-origin redirects fail closed in V0.1;
+  - redirect count, total timeout, and response-size limits are enforced;
+  - tests cover private/loopback/mapped addresses, mixed DNS answers, simulated rebinding, redirects, timeout, and a safe synthetic request.
+- Current full CI test inventory: 89 tests (contracts 6, domain 20, MCP server 26, security 37).
 - Cost routing remains operational; unsupported quality/latency/custom ordering fails closed.
 
 ## Important authentication boundary
 
-Phase 0B proves a secure deployment gate, not final ChatGPT user authentication. The static bearer boundary is temporary bootstrap infrastructure. Production OAuth/OIDC token verification, Principal -> AccountMembership -> Account authorization, and tenant isolation remain Phase 0E work and must follow current official MCP/OpenAI requirements.
+Phase 0B proves a secure deployment gate, not final ChatGPT user authentication. The static bearer boundary is temporary bootstrap infrastructure. Production OAuth/OIDC token verification, Principal -> AccountMembership -> Account authorization, tenant isolation, and output/log secret boundaries remain Phase 0E work and must follow current official MCP/OpenAI requirements.
 
 ## Current
 
-Phase 0D — SSRF protection at the actual outbound gateway dispatch boundary.
+Phase 0E — runtime authentication, tenant authorization, and secret-output boundaries.
 
 ## Canonical remaining order
 
-1. Phase 0D — SSRF protection at actual outbound dispatch.
-2. Phase 0E — runtime auth/tenancy/secrets.
-3. Phase 0C — connection-metadata-aware HTTPS routing.
-4. Phase 0F — Apps SDK/MCP UI.
-5. Phase 0G — synthetic repository-backed vertical slice.
-6. Phase 1 — minimal product orchestration.
-7. Final clean verification and release-readiness review.
+1. Phase 0E — runtime auth/tenancy/secrets.
+2. Phase 0C — connection-metadata-aware HTTPS routing.
+3. Phase 0F — Apps SDK/MCP UI.
+4. Phase 0G — synthetic repository-backed vertical slice.
+5. Phase 1 — minimal product orchestration.
+6. Final clean verification and release-readiness review.
 
 ## Completion rule
 
