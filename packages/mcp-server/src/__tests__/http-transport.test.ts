@@ -178,7 +178,9 @@ describe('MCP Streamable HTTP boundary', () => {
     const listed = parseRpcBody(listResult.body);
     expect(listed.error).toBeUndefined();
     expect(
-      (listed.result as { resources: Array<{ uri: string }> }).resources.map((resource) => resource.uri)
+      (listed.result as { resources: Array<{ uri: string }> }).resources.map(
+        (resource) => resource.uri
+      )
     ).toContain(GPTRouterDashboardResourceUri);
 
     const readResult = await post(port, {
@@ -190,9 +192,11 @@ describe('MCP Streamable HTTP boundary', () => {
     expect(readResult.status).toBe(200);
     const read = parseRpcBody(readResult.body);
     expect(read.error).toBeUndefined();
-    const resource = (read.result as {
-      contents: Array<{ uri: string; mimeType: string; text: string }>;
-    }).contents[0];
+    const resource = (
+      read.result as {
+        contents: Array<{ uri: string; mimeType: string; text: string }>;
+      }
+    ).contents[0];
     expect(resource.uri).toBe(GPTRouterDashboardResourceUri);
     expect(resource.mimeType).toBe('text/html;profile=mcp-app');
     expect(resource.text).toContain('Synthetic / no-spend');
@@ -212,13 +216,15 @@ describe('MCP Streamable HTTP boundary', () => {
     expect(result.status).toBe(200);
     const rpc = parseRpcBody(result.body);
     expect(rpc.error).toBeUndefined();
-    const structured = (rpc.result as {
-      structuredContent: {
-        active_page: string;
-        data_mode: string;
-        safety: { provider_execution_enabled: boolean; paid_calls_enabled: boolean };
-      };
-    }).structuredContent;
+    const structured = (
+      rpc.result as {
+        structuredContent: {
+          active_page: string;
+          data_mode: string;
+          safety: { provider_execution_enabled: boolean; paid_calls_enabled: boolean };
+        };
+      }
+    ).structuredContent;
     expect(structured.active_page).toBe('router');
     expect(structured.data_mode).toBe('synthetic');
     expect(structured.safety.provider_execution_enabled).toBe(false);
