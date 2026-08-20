@@ -5,6 +5,8 @@
 
 import type {
   Account,
+  AccountMembership,
+  Principal,
   Connection,
   ModelRoute,
   RoutingPolicy,
@@ -29,13 +31,27 @@ export interface ModelCatalog {
 }
 
 // ============================================================================
-// Repositories
+// Identity / Tenant Repositories
 // ============================================================================
+
+export interface PrincipalRepository {
+  getPrincipal(principal_id: string): Promise<Principal | null>;
+  getPrincipalBySubject(issuer: string, subject: string): Promise<Principal | null>;
+}
 
 export interface AccountRepository {
   getAccount(account_id: string): Promise<Account | null>;
   createAccount(account: Omit<Account, 'created_at'>): Promise<Account>;
 }
+
+export interface MembershipRepository {
+  getMembership(account_id: string, principal_id: string): Promise<AccountMembership | null>;
+  listMembershipsForPrincipal(principal_id: string): Promise<AccountMembership[]>;
+}
+
+// ============================================================================
+// Domain Repositories
+// ============================================================================
 
 export interface ConnectionRepository {
   listConnections(account_id: string): Promise<Connection[]>;

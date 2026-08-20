@@ -39,8 +39,6 @@ function requireEnv(env: NodeJS.ProcessEnv, key: string): string {
 function normalizeConfiguredHost(host: string): string {
   const normalized = parseHostHeader(host);
   if (normalized === null || host.includes(':')) {
-    // Configured allow-list entries must be hostnames/IP literals only, without ports.
-    // IPv6 literals are allowed in bracket form.
     if (!(host.startsWith('[') && host.endsWith(']') && normalized !== null)) {
       throw new Error(`Invalid allowed host: ${host}`);
     }
@@ -149,7 +147,6 @@ export function isAllowedOrigin(
   originHeader: string | undefined,
   allowedOrigins: string[]
 ): boolean {
-  // Non-browser MCP clients commonly omit Origin; Host + bearer auth still apply.
   if (originHeader === undefined) return true;
   if (originHeader === 'null') return false;
 
@@ -191,7 +188,8 @@ function writeJson(res: ServerResponse, status: number, body: Record<string, unk
   res.end(JSON.stringify(body));
 }
 
-export function applyRemoteRequestBoundary(
+/** Host/Origin boundary shared by bootstrap-bearer and OAuth remote modes. */
+export function applyRemoteNetworkBoundary(
   req: IncomingMessage,
   res: ServerResponse,
   config: HttpServerConfig
@@ -208,6 +206,18 @@ export function applyRemoteRequestBoundary(
     writeJson(res, 403, { error: 'forbidden_origin' });
     return false;
   }
+
+  return true;
+}
+
+/** Bootstrap bearer mode retained for development/deployment bring-up only. */
+export function applyRemoteRequestBoundary(
+  req: IncomingMessage,
+  res: ServerResponse,
+  config: HttpServerConfig
+): boolean {
+  if (!applyRemoteNetworkBoundary(req, res, config)) return false;
+  if (config.mode !== 'remote') return true;
 
   const authorization =
     typeof req.headers.authorization === 'string' ? req.headers.authorization : undefined;
