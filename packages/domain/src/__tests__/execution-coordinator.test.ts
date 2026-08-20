@@ -20,6 +20,8 @@ import {
   BudgetEnforcer,
   DeterministicVerifier,
   ExecutionCoordinator,
+  type ExecutionVerifier,
+  type RetryScheduler,
   type ExecutionOutput,
 } from '../index.js';
 
@@ -61,7 +63,13 @@ function output(): ExecutionOutput {
   };
 }
 
-function harness() {
+function harness(
+  verifier: ExecutionVerifier = new DeterministicVerifier(),
+  options: {
+    beforeDispatch?: (attempt: ExecutionAttempt) => Promise<void>;
+    scheduler?: RetryScheduler;
+  } = {}
+) {
   const task: Task = {
     task_id: 'task-test',
     account_id: accountId,
@@ -108,6 +116,15 @@ function harness() {
     admissibility_rules: {},
     budget_constraints: { max_cost_per_task: 0.01, daily_cap: 1, monthly_cap: 10 },
     manual_override_allowed: false,
+    retry_policy: {
+      max_retries: 1,
+      backoff_multiplier: 2,
+      initial_delay_ms: 10,
+      retryable_failure_codes: ['retryable_failure'],
+      fallback_enabled: false,
+      max_fallbacks: 0,
+      max_total_estimated_cost: 0.01,
+    },
     version: 1,
     created_at: now,
     updated_at: now,
@@ -129,7 +146,10 @@ function harness() {
       currentTask = { ...value, created_at: now };
       return { ...currentTask };
     },
-    async updateTaskStatus(_taskId, status) {
+    async updateTaskStatus(_taskId, status, expectedStatus) {
+      if (expectedStatus !== undefined && currentTask.status !== expectedStatus) {
+        throw new Error('state_conflict');
+      }
       const allowed: Record<Task['status'], Task['status'][]> = {
         planning: ['approved'],
         approved: ['executing'],
@@ -165,11 +185,15 @@ function harness() {
       return attempt ? { ...attempt } : null;
     },
     async createAttempt(value) {
-      const duplicate = [...attempts.values()].find(
-        (attempt) =>
-          attempt.account_id === value.account_id &&
-          attempt.idempotency_key === value.idempotency_key
-      );
+      const duplicate =
+        value.parent_attempt_id === null
+          ? [...attempts.values()].find(
+              (attempt) =>
+                attempt.account_id === value.account_id &&
+                attempt.idempotency_key === value.idempotency_key &&
+                attempt.parent_attempt_id === null
+            )
+          : undefined;
       if (duplicate) {
         const error = new Error('idempotency_conflict') as Error & { code: string };
         error.code = 'idempotency_conflict';
@@ -182,9 +206,12 @@ function harness() {
     async listAttemptsForTask(taskId) {
       return [...attempts.values()].filter((attempt) => attempt.task_id === taskId);
     },
-    async updateAttemptStatus(attemptId, status, updates) {
+    async updateAttemptStatus(attemptId, status, updates, expectedStatus) {
       const attempt = attempts.get(attemptId);
       if (!attempt) throw new Error('attempt_not_found');
+      if (expectedStatus !== undefined && attempt.status !== expectedStatus) {
+        throw new Error('state_conflict');
+      }
       const allowed: Record<ExecutionAttempt['status'], ExecutionAttempt['status'][]> = {
         pending: ['running', 'cancelled'],
         running: ['completed', 'failed', 'cancel_requested', 'cancelled'],
@@ -264,8 +291,10 @@ function harness() {
         return output();
       },
     },
-    verifier: new DeterministicVerifier(),
+    verifier,
     clock: () => now,
+    beforeDispatch: options.beforeDispatch,
+    scheduler: options.scheduler,
   });
   return {
     coordinator,
@@ -359,5 +388,93 @@ describe('ExecutionCoordinator invariants', () => {
       'task.execution.completed',
     ]);
     expect(first.usage_id).toBe(replay.usage_id);
+  });
+
+  it('retries retryable verification with a new attempt and preserves prior evidence', async () => {
+    let verificationCount = 0;
+    const delays: number[] = [];
+    const scheduled = harness(
+      {
+        async verify() {
+          verificationCount += 1;
+          return verificationCount === 1
+            ? { outcome: 'retryable_failure', failure_code: 'retryable_failure' }
+            : { outcome: 'accepted' };
+        },
+      },
+      {
+        scheduler: {
+          async schedule(delay_ms) {
+            delays.push(delay_ms);
+          },
+        },
+      }
+    );
+    const result = await scheduled.coordinator.runTask(scheduled.context, {
+      task_id: 'task-test',
+      decision_id: 'decision-test',
+      idempotency_key: 'retry-success',
+    });
+
+    expect(result.status).toBe('completed');
+    expect(result.attempt_ids).toHaveLength(2);
+    expect(result.retry_count).toBe(1);
+    expect(delays).toEqual([10]);
+    expect(scheduled.attempts.get(result.attempt_ids[0])?.status).toBe('failed');
+    expect(scheduled.attempts.get(result.attempt_ids[1])?.status).toBe('completed');
+  });
+
+  it('denies a retry when the current budget changes after the first attempt', async () => {
+    let verificationCount = 0;
+    const fixture = harness({
+      async verify() {
+        verificationCount += 1;
+        fixture.policy.budget_constraints.max_cost_per_task = verificationCount === 1 ? 0 : 0;
+        return { outcome: 'retryable_failure', failure_code: 'retryable_failure' };
+      },
+    });
+    const result = await fixture.coordinator.runTask(fixture.context, {
+      task_id: 'task-test',
+      decision_id: 'decision-test',
+      idempotency_key: 'retry-budget-denied',
+    });
+
+    expect(result.status).toBe('failed');
+    expect(result.failure_code).toBe('budget_denied');
+    expect(fixture.attempts.size).toBe(1);
+    expect(fixture.invocations()).toBe(1);
+  });
+
+  it('cancels a pending attempt through an expected-state transition', async () => {
+    let releaseDispatch!: () => void;
+    let observedAttempt!: ExecutionAttempt;
+    let resolveObserved!: () => void;
+    const dispatchGate = new Promise<void>((resolve) => {
+      releaseDispatch = resolve;
+    });
+    const observed = new Promise<void>((resolve) => {
+      resolveObserved = resolve;
+    });
+    const fixture = harness(undefined, {
+      beforeDispatch: async (attempt) => {
+        observedAttempt = attempt;
+        resolveObserved();
+        await dispatchGate;
+      },
+    });
+    const run = fixture.coordinator.runTask(fixture.context, {
+      task_id: 'task-test',
+      decision_id: 'decision-test',
+      idempotency_key: 'pending-cancel',
+    });
+    await observed;
+    const cancellation = await fixture.coordinator.cancelExecution(
+      fixture.context,
+      observedAttempt.attempt_id
+    );
+    expect(cancellation.status).toBe('cancelled');
+    releaseDispatch();
+    const result = await run;
+    expect(result.status).toBe('cancelled');
   });
 });

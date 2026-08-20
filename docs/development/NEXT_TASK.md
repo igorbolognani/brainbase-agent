@@ -1,21 +1,21 @@
 # Next Task
 
-## Phase 1B — Bounded Retry, Fallback, and Cancellation
+## Phase 1C — Real Provider Execution Gateway Integration
 
-Phase 1A provides authenticated deterministic synthetic execution. The next checkpoint adds bounded retry, immutable fallback decisions, and explicit attempt cancellation without enabling real provider calls.
+Phase 1B provides bounded retry, fallback, and cancellation for deterministic synthetic execution. The next checkpoint adds real provider execution behind the gateway boundary while preserving all Phase 1A/1B invariants.
 
 ### Required
 
-- Extend verification outcomes with `retryable_failure`.
-- Apply a bounded retry policy with deterministic scheduling and budget checks before every dispatch.
-- Create a new execution attempt for every retry and a new immutable routing decision for fallback.
-- Preserve usage and audit evidence for every dispatched attempt.
-- Implement `cancel_execution(attempt_id)` with idempotent cancellation and truthful completion races.
-- Keep account authorization, idempotency, secret-safe output, and provider/paid-call disablement intact.
+- Implement `GatewayExecutor` that dispatches to configured provider gateway URLs with SSRF protection (HTTPS required, DNS/IP validation, block loopback/private/link-local/cloud-metadata).
+- Pluggable credential resolution via `ProviderConnection` and `GatewayConnection` — never pass raw credentials through MCP or model-visible context.
+- Gateway request/response translation for OpenAI-compatible chat completions and embeddings.
+- Actual cost reconciliation from provider `usage` fields with provenance; synthetic actual cost remains zero in synthetic mode.
+- Preserve all Phase 1B retry/fallback/cancellation semantics with real provider calls (deterministic scheduling, budget re-check, attempt immutability, idempotency, audit).
+- Structured logging with allowlist + central redaction defense-in-depth; never rely solely on regex for secret safety.
+- MCP `run_task` tool dispatches to real gateway when `provider_execution_enabled: true` (off by default in synthetic mode).
 
 ### Do not implement yet
 
-- real paid provider execution;
 - generic workflow/node editor;
 - private/local gateway bridge;
 - production database deployment;
@@ -23,4 +23,4 @@ Phase 1A provides authenticated deterministic synthetic execution. The next chec
 
 ### Exit gate
 
-The full clean gate plus retry, fallback, cancellation, account-isolation, and real HTTP MCP regressions must be green before Phase 1C begins.
+The full clean gate plus real gateway dispatch, credential boundary, SSRF validation, usage reconciliation, and regression of all Phase 1B retry/fallback/cancellation tests must be green before proceeding.

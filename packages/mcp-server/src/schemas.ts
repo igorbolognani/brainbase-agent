@@ -36,8 +36,13 @@ export const RunTaskInput = z.object({
   idempotency_key: z.string().min(1).max(200).describe('Stable key preventing duplicate dispatch'),
 });
 
+export const CancelExecutionInput = z.object({
+  attempt_id: z.string().min(1).describe('Execution attempt ID from run_task or get_task'),
+});
+
 export type ListModelsArgs = z.infer<typeof ListModelsInput>;
 export type RouteTaskArgs = z.infer<typeof RouteTaskInput>;
 export type GetTaskArgs = z.infer<typeof GetTaskInput>;
 export type GetUsageArgs = z.infer<typeof GetUsageInput>;
 export type RunTaskArgs = z.infer<typeof RunTaskInput>;
+export type CancelExecutionArgs = z.infer<typeof CancelExecutionInput>;

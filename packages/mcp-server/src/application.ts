@@ -31,6 +31,7 @@ import {
   generateId,
   RoutingEngine,
   SyntheticExecutor,
+  type FallbackPlanner,
   type ExecutionCoordinatorRepositories,
   type ExecutionExecutor,
   type ExecutionProjection,
@@ -108,6 +109,10 @@ export interface TaskProjection {
   latest_decision: PublicRoutingDecision | null;
   attempts: PublicAttemptProjection[];
   latest_attempt: PublicAttemptProjection | null;
+  execution_id: string | null;
+  retry_count: number;
+  fallback_count: number;
+  audit_degraded: boolean;
   actual_cost: number;
   estimated_cost: number | null;
   cost_variance: number | null;
@@ -129,10 +134,13 @@ export interface PublicRoutingDecision {
   estimated_cost: number | null;
   rejection_reasons: RoutingDecision['rejection_reasons'];
   decided_at: string;
+  parent_decision_id: string | null;
+  fallback_reason: string | null;
 }
 
 export interface PublicAttemptProjection {
   attempt_id: string;
+  execution_id: string;
   task_id: string;
   decision_id: string;
   status: ExecutionAttempt['status'];
@@ -143,12 +151,15 @@ export interface PublicAttemptProjection {
   completed_at: string | null;
   cancel_requested_at: string | null;
   cancelled_at: string | null;
+  parent_attempt_id: string | null;
 }
 
 export interface UsageProjection {
   time_range: 'today' | 'week' | 'month';
   planning_requests: number;
   execution_requests: number;
+  execution_roots: number;
+  total_attempts: number;
   successful_executions: number;
   failed_attempts: number;
   cancelled_attempts: number;
@@ -156,6 +167,7 @@ export interface UsageProjection {
   estimated_planned_cost: number;
   actual_usage_records: number;
   cost_variance: number;
+  audit_degraded: boolean;
   data_mode: typeof SYNTHETIC_DATA_MODE;
   note: string;
 }
@@ -171,6 +183,10 @@ export interface DashboardRuntimeSummary {
   cancelled_attempt_count: number;
   actual_spend: number;
   estimated_planned_cost: number;
+  retry_count: number;
+  fallback_count: number;
+  audit_degraded: boolean;
+  audit_failure_count: number;
   synthetic_execution_enabled: true;
   provider_execution_enabled: false;
   paid_calls_enabled: false;
@@ -192,10 +208,16 @@ export interface PublicAuditEvent {
   timestamp: string;
 }
 
+export interface AuditStatus {
+  audit_degraded: boolean;
+  audit_failure_count: number;
+}
+
 export interface SyntheticApplicationOptions {
   executor?: ExecutionExecutor;
   verifier?: ExecutionVerifier;
   requireAuthorizedExecution?: boolean;
+  audit_failure_mode?: boolean;
 }
 
 export interface GPTRouterApplication {
@@ -218,11 +240,16 @@ export interface GPTRouterApplication {
     request: ExecutionRequest,
     context?: AuthorizedExecutionContext
   ): Promise<ExecutionProjection>;
+  cancelExecution(
+    attempt_id: string,
+    context?: AuthorizedExecutionContext
+  ): Promise<ExecutionProjection>;
   authorizeVerifiedIdentity(
     identity: VerifiedExecutionIdentity,
     minimumRole?: AccountMembership['role']
   ): Promise<AuthorizedExecutionContext>;
   getAuditEvents(context?: AuthorizedExecutionContext): Promise<PublicAuditEvent[]>;
+  getAuditStatus(): AuditStatus;
   getSyntheticAuthorizedContext(): AuthorizedExecutionContext;
 }
 
@@ -239,6 +266,7 @@ interface SyntheticStore {
   usage: Map<string, UsageRecord>;
   audit: Map<string, AuditEvent>;
   auditOrder: string[];
+  auditFailureCount: number;
 }
 
 interface SyntheticRepositories {
@@ -256,6 +284,10 @@ interface SyntheticRepositories {
   audit: AuditRepository;
 }
 
+interface SyntheticRepositoryOptions {
+  audit_failure_mode?: boolean;
+}
+
 function clone<T>(value: T): T {
   return structuredClone(value);
 }
@@ -268,7 +300,10 @@ function safeAuditMetadata(value: Record<string, unknown>): Record<string, unkno
   return {};
 }
 
-function createSyntheticRepositories(now: Date): SyntheticRepositories {
+function createSyntheticRepositories(
+  now: Date,
+  options: SyntheticRepositoryOptions = {}
+): SyntheticRepositories {
   const store: SyntheticStore = {
     principals: new Map(),
     accounts: new Map(),
@@ -282,6 +317,7 @@ function createSyntheticRepositories(now: Date): SyntheticRepositories {
     usage: new Map(),
     audit: new Map(),
     auditOrder: [],
+    auditFailureCount: 0,
   };
 
   const principals: PrincipalRepository = {
@@ -420,9 +456,12 @@ function createSyntheticRepositories(now: Date): SyntheticRepositories {
       store.tasks.set(created.task_id, clone(created));
       return clone(created);
     },
-    async updateTaskStatus(task_id, status) {
+    async updateTaskStatus(task_id, status, expected_status) {
       const task = store.tasks.get(task_id);
       if (!task) return;
+      if (expected_status !== undefined && task.status !== expected_status) {
+        throw new Error('state_conflict');
+      }
       if (task.status !== status) {
         const allowed: Record<Task['status'], Task['status'][]> = {
           planning: ['approved'],
@@ -463,15 +502,23 @@ function createSyntheticRepositories(now: Date): SyntheticRepositories {
     },
     async getAttemptByIdempotencyKey(account_id, idempotency_key) {
       const attempt = [...store.attempts.values()].find(
-        (item) => item.account_id === account_id && item.idempotency_key === idempotency_key
+        (item) =>
+          item.account_id === account_id &&
+          item.idempotency_key === idempotency_key &&
+          item.parent_attempt_id === null
       );
       return attempt ? clone(attempt) : null;
     },
     async createAttempt(attempt) {
-      const duplicate = [...store.attempts.values()].find(
-        (item) =>
-          item.account_id === attempt.account_id && item.idempotency_key === attempt.idempotency_key
-      );
+      const duplicate =
+        attempt.parent_attempt_id === null
+          ? [...store.attempts.values()].find(
+              (item) =>
+                item.account_id === attempt.account_id &&
+                item.idempotency_key === attempt.idempotency_key &&
+                item.parent_attempt_id === null
+            )
+          : undefined;
       if (duplicate) {
         const error = new Error('idempotency_conflict') as Error & { code: string };
         error.code = 'idempotency_conflict';
@@ -487,9 +534,12 @@ function createSyntheticRepositories(now: Date): SyntheticRepositories {
         .sort((a, b) => a.created_at.getTime() - b.created_at.getTime())
         .map(clone);
     },
-    async updateAttemptStatus(attempt_id, status, updates) {
+    async updateAttemptStatus(attempt_id, status, updates, expected_status) {
       const attempt = store.attempts.get(attempt_id);
       if (!attempt) return;
+      if (expected_status !== undefined && attempt.status !== expected_status) {
+        throw new Error('state_conflict');
+      }
       if (attempt.status !== status) {
         const allowed: Record<ExecutionAttempt['status'], ExecutionAttempt['status'][]> = {
           pending: ['running', 'cancelled'],
@@ -551,6 +601,7 @@ function createSyntheticRepositories(now: Date): SyntheticRepositories {
 
   const audit: AuditRepository = {
     async recordEvent(event) {
+      if (options.audit_failure_mode) throw new Error('audit_unavailable');
       const created: AuditEvent = {
         ...event,
         metadata: safeAuditMetadata(event.metadata),
@@ -658,6 +709,15 @@ function createSyntheticRepositories(now: Date): SyntheticRepositories {
       max_cost_per_task: 0.05,
       daily_cap: 1,
       monthly_cap: 10,
+    },
+    retry_policy: {
+      max_retries: 1,
+      backoff_multiplier: 2,
+      initial_delay_ms: 0,
+      retryable_failure_codes: ['retryable_failure', 'synthetic_retryable_failure'],
+      fallback_enabled: true,
+      max_fallbacks: 1,
+      max_total_estimated_cost: 0.05,
     },
     manual_override_allowed: true,
     version: 1,
@@ -769,12 +829,15 @@ function toPublicDecision(decision: RoutingDecision): PublicRoutingDecision {
     estimated_cost: decision.estimated_cost,
     rejection_reasons: clone(decision.rejection_reasons),
     decided_at: decision.decided_at.toISOString(),
+    parent_decision_id: decision.parent_decision_id ?? null,
+    fallback_reason: decision.fallback_reason ?? null,
   };
 }
 
 function toPublicAttempt(attempt: ExecutionAttempt): PublicAttemptProjection {
   return {
     attempt_id: attempt.attempt_id,
+    execution_id: attempt.execution_id,
     task_id: attempt.task_id,
     decision_id: attempt.decision_id,
     status: attempt.status,
@@ -785,13 +848,16 @@ function toPublicAttempt(attempt: ExecutionAttempt): PublicAttemptProjection {
     completed_at: attempt.completed_at?.toISOString() ?? null,
     cancel_requested_at: attempt.cancel_requested_at?.toISOString() ?? null,
     cancelled_at: attempt.cancelled_at?.toISOString() ?? null,
+    parent_attempt_id: attempt.parent_attempt_id,
   };
 }
 
 export function createSyntheticGPTRouterApplication(
   options: SyntheticApplicationOptions = {}
 ): GPTRouterApplication {
-  const repositories = createSyntheticRepositories(new Date());
+  const repositories = createSyntheticRepositories(new Date(), {
+    audit_failure_mode: options.audit_failure_mode,
+  });
   const budgetEnforcer = new BudgetEnforcer(repositories.usage);
   const routingEngine = new RoutingEngine({
     checkBudget: (account_id, estimated_cost, policy) =>
@@ -799,6 +865,18 @@ export function createSyntheticGPTRouterApplication(
     estimateCost: (route) => estimateRouteCost(route),
     getConnection: (connection_id) => repositories.connections.getConnection(connection_id),
   });
+  const fallbackPlanner: FallbackPlanner = {
+    async planFallback({ task, original_decision, excluded_route_ids }) {
+      const policy = await repositories.policies.getPolicy(original_decision.policy_id);
+      if (!policy || policy.account_id !== task.account_id) return null;
+      const excluded = new Set(excluded_route_ids);
+      const routes = (await repositories.routes.listRoutes(task.account_id)).filter(
+        (route) => !excluded.has(route.route_id)
+      );
+      const decision = await routingEngine.planRoute(task, policy, routes);
+      return decision.selected_route_id ? decision : null;
+    },
+  };
   const authorization = new AccountAuthorizationService({
     accounts: repositories.accounts,
     memberships: repositories.memberships,
@@ -839,6 +917,10 @@ export function createSyntheticGPTRouterApplication(
     budgetEnforcer,
     executor: options.executor ?? new SyntheticExecutor(),
     verifier: options.verifier ?? new DeterministicVerifier(),
+    fallbackPlanner,
+    onAuditFailure: () => {
+      repositories.store.auditFailureCount += 1;
+    },
   });
 
   async function decisionsForAccount(account_id: string): Promise<RoutingDecision[]> {
@@ -930,6 +1012,10 @@ export function createSyntheticGPTRouterApplication(
       const latestAttempt = attempts.at(-1) ?? null;
       const estimatedCost = latestDecision?.estimated_cost ?? null;
       const actualCost = taskUsage.reduce((sum, record) => sum + record.actual_cost, 0);
+      const auditStatus = {
+        audit_degraded: repositories.store.auditFailureCount > 0,
+        audit_failure_count: repositories.store.auditFailureCount,
+      };
       return {
         task: {
           task_id: task.task_id,
@@ -943,9 +1029,23 @@ export function createSyntheticGPTRouterApplication(
         latest_decision: latestDecision ? toPublicDecision(latestDecision) : null,
         attempts: attempts.map(toPublicAttempt),
         latest_attempt: latestAttempt ? toPublicAttempt(latestAttempt) : null,
+        execution_id: latestAttempt?.execution_id ?? null,
+        retry_count: attempts.reduce((sum, attempt) => sum + attempt.retry_count, 0),
+        fallback_count: decisions.filter((decision) => decision.parent_decision_id).length,
+        audit_degraded: auditStatus.audit_degraded,
         actual_cost: actualCost,
         estimated_cost: estimatedCost,
-        cost_variance: estimatedCost === null ? null : actualCost - estimatedCost,
+        cost_variance:
+          estimatedCost === null
+            ? null
+            : actualCost -
+              attempts.reduce(
+                (sum, attempt) =>
+                  sum +
+                  (decisions.find((decision) => decision.decision_id === attempt.decision_id)
+                    ?.estimated_cost ?? 0),
+                0
+              ),
         execution_status: latestAttempt?.status ?? 'not_started',
         verification_outcome: latestAttempt?.verification_outcome ?? null,
         cancellation_status:
@@ -970,6 +1070,7 @@ export function createSyntheticGPTRouterApplication(
       const usage = (await repositories.usage.listUsageForAccount(accountId)).filter(
         (record) => record.reconciled_at >= start
       );
+      const executionRoots = new Set(attempts.map((attempt) => attempt.execution_id));
       const estimatedPlannedCost = decisions.reduce(
         (sum, decision) => sum + (decision.estimated_cost ?? 0),
         0
@@ -978,6 +1079,8 @@ export function createSyntheticGPTRouterApplication(
         time_range,
         planning_requests: decisions.length,
         execution_requests: attempts.length,
+        execution_roots: executionRoots.size,
+        total_attempts: attempts.length,
         successful_executions: attempts.filter((attempt) => attempt.status === 'completed').length,
         failed_attempts: attempts.filter((attempt) => attempt.status === 'failed').length,
         cancelled_attempts: attempts.filter((attempt) => attempt.status === 'cancelled').length,
@@ -985,6 +1088,7 @@ export function createSyntheticGPTRouterApplication(
         estimated_planned_cost: estimatedPlannedCost,
         actual_usage_records: usage.length,
         cost_variance: usage.reduce((sum, record) => sum + (record.cost_variance ?? 0), 0),
+        audit_degraded: repositories.store.auditFailureCount > 0,
         data_mode: SYNTHETIC_DATA_MODE,
         note: 'Synthetic execution only. Actual provider execution and paid calls remain disabled.',
       };
@@ -997,12 +1101,13 @@ export function createSyntheticGPTRouterApplication(
       const usage = await repositories.usage.listUsageForAccount(accountId);
       const taskCount = (await repositories.tasks.listTasks(accountId)).length;
       const routeCount = (await repositories.routes.listRoutes(accountId)).length;
+      const executionRoots = new Set(attempts.map((attempt) => attempt.execution_id));
       return {
         data_source: SYNTHETIC_DATA_MODE,
         route_count: routeCount,
         task_count: taskCount,
         decision_count: decisions.length,
-        execution_count: attempts.length,
+        execution_count: executionRoots.size,
         successful_execution_count: attempts.filter((attempt) => attempt.status === 'completed')
           .length,
         failed_attempt_count: attempts.filter((attempt) => attempt.status === 'failed').length,
@@ -1013,6 +1118,10 @@ export function createSyntheticGPTRouterApplication(
           (sum, decision) => sum + (decision.estimated_cost ?? 0),
           0
         ),
+        retry_count: attempts.reduce((sum, attempt) => sum + attempt.retry_count, 0),
+        fallback_count: decisions.filter((decision) => decision.parent_decision_id).length,
+        audit_degraded: repositories.store.auditFailureCount > 0,
+        audit_failure_count: repositories.store.auditFailureCount,
         synthetic_execution_enabled: true,
         provider_execution_enabled: false,
         paid_calls_enabled: false,
@@ -1024,6 +1133,13 @@ export function createSyntheticGPTRouterApplication(
         context ?? (options.requireAuthorizedExecution ? undefined : syntheticContext);
       if (!executionContext) throw new AuthorizationError();
       return executionCoordinator.runTask(executionContext, request);
+    },
+
+    async cancelExecution(attempt_id, context) {
+      const executionContext =
+        context ?? (options.requireAuthorizedExecution ? undefined : syntheticContext);
+      if (!executionContext) throw new AuthorizationError();
+      return executionCoordinator.cancelExecution(executionContext, attempt_id);
     },
 
     async authorizeVerifiedIdentity(identity, minimumRole = 'member') {
@@ -1047,6 +1163,13 @@ export function createSyntheticGPTRouterApplication(
         metadata: safeAuditMetadata(event.metadata),
         timestamp: event.timestamp.toISOString(),
       }));
+    },
+
+    getAuditStatus() {
+      return {
+        audit_degraded: repositories.store.auditFailureCount > 0,
+        audit_failure_count: repositories.store.auditFailureCount,
+      };
     },
 
     getSyntheticAuthorizedContext() {

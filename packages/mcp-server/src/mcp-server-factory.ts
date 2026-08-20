@@ -2,6 +2,7 @@ import { McpServer } from '@modelcontextprotocol/server';
 import {
   GetTaskInput,
   GetUsageInput,
+  CancelExecutionInput,
   ListModelsInput,
   RouteTaskInput,
   RunTaskInput,
@@ -116,6 +117,23 @@ export function createGPTRouterMcpServer(options: GPTRouterMcpServerOptions = {}
       },
     },
     async (args, context) => handlers.runTaskHandler(args, context)
+  );
+
+  server.registerTool(
+    'cancel_execution',
+    {
+      title: 'Cancel execution',
+      description:
+        'Request cancellation of one synthetic execution attempt. Cancellation is idempotent and never invokes a provider.',
+      inputSchema: CancelExecutionInput,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    async (args, context) => handlers.cancelExecutionHandler(args, context)
   );
 
   registerGPTRouterDashboardUi(server, {

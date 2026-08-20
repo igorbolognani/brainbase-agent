@@ -80,7 +80,11 @@ export interface TaskRepository {
   getTask(task_id: string): Promise<Task | null>;
   listTasks(account_id: string): Promise<Task[]>;
   createTask(task: Omit<Task, 'created_at'>): Promise<Task>;
-  updateTaskStatus(task_id: string, status: Task['status']): Promise<void>;
+  updateTaskStatus(
+    task_id: string,
+    status: Task['status'],
+    expected_status?: Task['status']
+  ): Promise<void>;
 }
 
 export interface DecisionRepository {
@@ -100,7 +104,8 @@ export interface ExecutionRepository {
   updateAttemptStatus(
     attempt_id: string,
     status: ExecutionAttempt['status'],
-    updates: Partial<ExecutionAttempt>
+    updates: Partial<ExecutionAttempt>,
+    expected_status?: ExecutionAttempt['status']
   ): Promise<void>;
 }
 

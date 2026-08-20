@@ -242,6 +242,7 @@ export interface RoutingPolicy {
   ordering_strategy: OrderingStrategy;
   admissibility_rules: AdmissibilityRules;
   budget_constraints: BudgetConstraints;
+  retry_policy?: RetryPolicy;
   manual_override_allowed: boolean;
   version: number;
   created_at: Date;
@@ -295,6 +296,9 @@ export interface RoutingDecision {
   rejection_reasons: RejectionReason[];
   estimated_cost: number | null;
   decided_at: Date;
+  /** Immutable provenance link when this decision was created by fallback. */
+  parent_decision_id?: string | null;
+  fallback_reason?: string | null;
   /**
    * Indicates if the requested ordering strategy is unsupported.
    * When true, no route was selected even if admissible routes exist.
@@ -306,11 +310,21 @@ export interface RetryPolicy {
   max_retries: number;
   backoff_multiplier: number;
   initial_delay_ms: number;
+  /** Failure classes eligible for retry; an empty list means all retryable outcomes. */
+  retryable_failure_codes?: string[];
+  /** Whether a new route may be selected after same-route retry exhaustion. */
+  fallback_enabled?: boolean;
+  /** Maximum number of fallback decisions for one execution request. */
+  max_fallbacks?: number;
+  /** Aggregate planned-cost ceiling across all attempts and fallback decisions. */
+  max_total_estimated_cost?: number | null;
 }
 
 export interface ExecutionAttempt {
   attempt_id: string;
   account_id: string;
+  /** Stable execution-request identity shared by retry/fallback attempts. */
+  execution_id: string;
   task_id: string;
   decision_id: string;
   idempotency_key: string;
@@ -321,6 +335,7 @@ export interface ExecutionAttempt {
   cancelled_at: Date | null;
   retry_count: number;
   retry_policy: RetryPolicy | null;
+  parent_attempt_id: string | null;
   verification_outcome: VerificationOutcome | null;
   failure_code: string | null;
   created_at: Date;

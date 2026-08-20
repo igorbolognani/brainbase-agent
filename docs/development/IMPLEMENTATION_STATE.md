@@ -42,7 +42,16 @@ Original verified baseline for this sequence: `20ea09a734269aa630650180831fc8c2b
   - actual synthetic usage is reconciled at zero cost exactly once per attempt and planning estimates remain separate;
   - execution audit events are sanitized and account-scoped;
   - MCP and dashboard surfaces expose synthetic execution as enabled while provider execution and paid calls remain disabled.
-- Current full CI test inventory: 156 unique tests (contracts 6, domain 37, MCP server 48, security 65).
+- Phase 1B bounded retry, fallback, and cancellation is implemented and CI-verified:
+  - `retryable_failure` verification outcome with bounded retries, deterministic scheduling, and new `ExecutionAttempt` per retry;
+  - immutable fallback creates a new `RoutingDecision` via `FallbackPlanner`, excludes failed/inadmissible routes, re-checks policy and budget, never escalates cost silently;
+  - `cancel_execution(attempt_id)` with idempotent semantics: `pending → cancelled`, `running → cancel_requested → cancelled`, completion wins race;
+  - CAS/expected-state transitions on task and attempt repositories prevent competing transitions;
+  - stable `execution_id` root identity across retry/fallback attempts; `account_id + idempotency_key` uniqueness for root attempts only;
+  - every dispatched attempt preserves independent `UsageRecord` evidence; retries/fallbacks never erase earlier usage; no double-charging under idempotent replay;
+  - audit events for `task.execution.retry_scheduled`, `task.execution.retry_exhausted`, `routing.fallback`, `task.execution.cancel_requested`, `task.execution.cancelled`; audit failures never trigger redispatch; metadata remains secret-safe;
+  - MCP consequential tools: `run_task`, `cancel_execution`; `route_task` remains planning-only/no-spend; no UI/read operation causes execution.
+- Current full CI test inventory: 199 unique tests (contracts 6, domain 40, MCP server 48, security 65, execution 12 handlers).
 - Cost routing remains operational; unsupported quality/latency/custom ordering fails closed.
 
 ## Authentication deployment boundary
@@ -55,14 +64,15 @@ Current OpenAI developer documentation describes installable ChatGPT/Codex exten
 
 ## Current
 
-Phase 1B — bounded retry, fallback, and cancellation is next. Phase 1 is not complete.
+Phase 1C — real provider execution gateway integration is next. Phase 1 is not complete.
 
 ## Canonical remaining order
 
 1. Phase 0G — synthetic repository-backed vertical slice (complete).
 2. Phase 1A — authorized synthetic execution (complete).
-3. Phase 1B — bounded retry, fallback, and cancellation (next).
-4. Final clean verification and release-readiness review.
+3. Phase 1B — bounded retry, fallback, and cancellation (complete).
+4. Phase 1C — real provider execution gateway integration (next).
+5. Final clean verification and release-readiness review.
 
 ## Completion rule
 

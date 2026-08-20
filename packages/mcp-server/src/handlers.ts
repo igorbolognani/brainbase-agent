@@ -14,6 +14,7 @@ import type {
   ListModelsArgs,
   RouteTaskArgs,
   RunTaskArgs,
+  CancelExecutionArgs,
 } from './schemas.js';
 import {
   createSyntheticGPTRouterApplication,
@@ -132,6 +133,13 @@ export function createGPTRouterHandlers(
         )
       );
     },
+
+    async cancelExecutionHandler(args: CancelExecutionArgs, context?: McpToolContext) {
+      const requireExecutionAuth =
+        options.requireAuthenticatedExecution ?? options.requireAuthenticatedAccount ?? false;
+      const account = await authorizedContext(application, context, requireExecutionAuth, 'member');
+      return toolResult(await application.cancelExecution(args.attempt_id, account));
+    },
   };
 }
 
@@ -144,3 +152,5 @@ export const routeTaskHandler = (args: RouteTaskArgs) => defaultHandlers.routeTa
 export const getTaskHandler = (args: GetTaskArgs) => defaultHandlers.getTaskHandler(args);
 export const getUsageHandler = (args: GetUsageArgs) => defaultHandlers.getUsageHandler(args);
 export const runTaskHandler = (args: RunTaskArgs) => defaultHandlers.runTaskHandler(args);
+export const cancelExecutionHandler = (args: CancelExecutionArgs) =>
+  defaultHandlers.cancelExecutionHandler(args);

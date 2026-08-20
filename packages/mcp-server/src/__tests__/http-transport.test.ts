@@ -208,6 +208,7 @@ describe('MCP Streamable HTTP boundary', () => {
       'get_task',
       'get_usage',
       'run_task',
+      'cancel_execution',
       'render_gptrouter_dashboard',
     ]);
     expect(tools).toContain('run_task');
