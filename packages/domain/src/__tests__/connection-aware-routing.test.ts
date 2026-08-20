@@ -77,9 +77,7 @@ function providerRoute(): ModelRoute {
   };
 }
 
-function gatewayConnection(
-  overrides: Partial<GatewayConnection> = {}
-): GatewayConnection {
+function gatewayConnection(overrides: Partial<GatewayConnection> = {}): GatewayConnection {
   return {
     type: 'gateway',
     connection_id: 'gateway-connection-1',
@@ -134,7 +132,9 @@ describe('connection-aware HTTPS routing', () => {
   });
 
   it('rejects an HTTP gateway URL', async () => {
-    const rejection = await rejectionFor(gatewayConnection({ gateway_url: 'http://gateway.example.com' }));
+    const rejection = await rejectionFor(
+      gatewayConnection({ gateway_url: 'http://gateway.example.com' })
+    );
     expect(rejection).toMatchObject({ reason_code: 'policy_violation_security' });
     expect(rejection.details).toContain('HTTPS');
   });
@@ -156,10 +156,13 @@ describe('connection-aware HTTPS routing', () => {
     expect(rejection.details).toContain('not a gateway');
   });
 
-  it.each(['revoked', 'expired', 'error'] as const)('rejects %s gateway connections', async (status) => {
-    const rejection = await rejectionFor(gatewayConnection({ status }));
-    expect(rejection.details).toContain(status);
-  });
+  it.each(['revoked', 'expired', 'error'] as const)(
+    'rejects %s gateway connections',
+    async (status) => {
+      const rejection = await rejectionFor(gatewayConnection({ status }));
+      expect(rejection.details).toContain(status);
+    }
+  );
 
   it('rejects a cross-account gateway connection', async () => {
     const rejection = await rejectionFor(gatewayConnection({ account_id: 'account-2' }));
