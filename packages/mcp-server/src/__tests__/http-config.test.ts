@@ -91,6 +91,8 @@ describe('HTTP request boundary primitives', () => {
     expect(isAllowedOrigin('https://evil.chatgpt.com', allowed)).toBe(false);
     expect(isAllowedOrigin('http://chatgpt.com', allowed)).toBe(false);
     expect(isAllowedOrigin('https://user@chatgpt.com', allowed)).toBe(false);
+    expect(isAllowedOrigin('https://chatgpt.com/path', allowed)).toBe(false);
+    expect(isAllowedOrigin('https://chatgpt.com?x=1', allowed)).toBe(false);
     expect(isAllowedOrigin('null', allowed)).toBe(false);
   });
 
