@@ -1,102 +1,17 @@
 #!/usr/bin/env node
-/**
- * GPTRouter MCP Server (v2) - Stdio Entry Point
- *
- * MCP server for ChatGPT Apps SDK / MCP Apps
- * Exposes safe, read-only routing tools for V0.1 vertical slice
- *
- * This entry point uses stdio transport for local development.
- * For remote HTTP access, use http-server.ts
- *
- * Tools:
- * - list_models: List available models/routes
- * - route_task: Plan a route (NO execution, NO spend)
- * - get_task: Retrieve task status
- * - get_usage: Get usage summary
- *
- * run_task is intentionally NOT exposed in V0.1 (no execution adapters yet)
- */
-
-import { McpServer } from '@modelcontextprotocol/server';
+/** GPTRouter MCP Server (v2) - stdio local-development entry point. */
 import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
-import { ListModelsInput, RouteTaskInput, GetTaskInput, GetUsageInput } from './schemas.js';
-import {
-  listModelsHandler,
-  routeTaskHandler,
-  getTaskHandler,
-  getUsageHandler,
-} from './handlers.js';
+import { createGPTRouterMcpServer } from './mcp-server-factory.js';
 
-// ============================================================================
-// Server Factory
-// ============================================================================
-
-function createGPTRouterServer() {
-  const server = new McpServer({
-    name: 'gptrouter-mcp',
-    version: '0.1.0',
-  });
-
-  server.registerTool(
-    'list_models',
-    {
-      description:
-        'List available AI models and routes. Returns models with capabilities, pricing, and availability. Read-only, no API calls made.',
-      inputSchema: ListModelsInput,
-    },
-    listModelsHandler
-  );
-
-  server.registerTool(
-    'route_task',
-    {
-      description:
-        'Plan the best route for a task based on requirements and policy. DOES NOT execute or spend money. Returns routing decision with estimated cost and selected route.',
-      inputSchema: RouteTaskInput,
-    },
-    routeTaskHandler
-  );
-
-  server.registerTool(
-    'get_task',
-    {
-      description:
-        'Retrieve task status and routing decision. Returns task details, selected route, and execution status if applicable.',
-      inputSchema: GetTaskInput,
-    },
-    getTaskHandler
-  );
-
-  server.registerTool(
-    'get_usage',
-    {
-      description:
-        'Get usage summary and cost breakdown. Returns aggregate usage statistics and cost information. Read-only.',
-      inputSchema: GetUsageInput,
-    },
-    getUsageHandler
-  );
-
-  return server;
-}
-
-// ============================================================================
-// Server Startup (Stdio Transport)
-// ============================================================================
-
-async function main() {
-  const server = createGPTRouterServer();
+async function main(): Promise<void> {
+  const server = createGPTRouterMcpServer();
   const transport = new StdioServerTransport();
   await server.connect(transport);
-
-  console.error('GPTRouter MCP Server started (v2)');
-  console.error('V0.1: Exposes safe, read-only routing tools');
+  console.error('GPTRouter MCP Server started (v2, stdio local development)');
   console.error('Available tools: list_models, route_task, get_task, get_usage');
-  console.error('Transport: stdio (for local development)');
-  console.error('For remote HTTP access, use: node dist/http-server.js');
 }
 
-main().catch((error) => {
+main().catch((error: unknown) => {
   console.error('Fatal error:', error);
   process.exit(1);
 });
