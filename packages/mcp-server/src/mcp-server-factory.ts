@@ -2,6 +2,7 @@ import { McpServer } from '@modelcontextprotocol/server';
 import {
   GetTaskInput,
   GetUsageInput,
+  GetAuditEventsInput,
   CancelExecutionInput,
   ListModelsInput,
   RouteTaskInput,
@@ -134,6 +135,23 @@ export function createGPTRouterMcpServer(options: GPTRouterMcpServerOptions = {}
       },
     },
     async (args, context) => handlers.cancelExecutionHandler(args, context)
+  );
+
+  server.registerTool(
+    'get_audit_events',
+    {
+      title: 'Get audit events',
+      description:
+        'Retrieve account-scoped activity and audit events with sanitized metadata. Bounded results, no secret-bearing fields.',
+      inputSchema: GetAuditEventsInput,
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    async (args, context) => handlers.getAuditEventsHandler(args, context)
   );
 
   registerGPTRouterDashboardUi(server, {

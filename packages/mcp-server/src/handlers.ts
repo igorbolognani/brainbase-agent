@@ -11,6 +11,7 @@ import { AuthorizationError } from '@gptrouter/security';
 import type {
   GetTaskArgs,
   GetUsageArgs,
+  GetAuditEventsArgs,
   ListModelsArgs,
   RouteTaskArgs,
   RunTaskArgs,
@@ -140,6 +141,14 @@ export function createGPTRouterHandlers(
       const account = await authorizedContext(application, context, requireExecutionAuth, 'member');
       return toolResult(await application.cancelExecution(args.attempt_id, account));
     },
+
+    async getAuditEventsHandler(args: GetAuditEventsArgs, context?: McpToolContext) {
+      const requireAccount = options.requireAuthenticatedAccount ?? false;
+      const account = await authorizedContext(application, context, requireAccount, 'viewer');
+      return toolResult(
+        await application.getAuditEvents(account, args.limit, args.offset, args.event_type)
+      );
+    },
   };
 }
 
@@ -154,3 +163,5 @@ export const getUsageHandler = (args: GetUsageArgs) => defaultHandlers.getUsageH
 export const runTaskHandler = (args: RunTaskArgs) => defaultHandlers.runTaskHandler(args);
 export const cancelExecutionHandler = (args: CancelExecutionArgs) =>
   defaultHandlers.cancelExecutionHandler(args);
+export const getAuditEventsHandler = (args: GetAuditEventsArgs) =>
+  defaultHandlers.getAuditEventsHandler(args);

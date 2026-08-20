@@ -34,7 +34,7 @@ Original verified baseline for this sequence: `20ea09a734269aa630650180831fc8c2b
   - no `run_task`, no execution adapters, no outbound provider/gateway dispatch, no paid calls;
   - secret-like values do not appear in public tool outputs;
   - workspace test resolution maps `@gptrouter/*` packages to source so `npm test` passes without pre-existing `dist`.
-- Phase 1A authorized synthetic execution is implemented and CI-verified:
+- Phase 1A authorized synthetic execution is implemented and locally clean-gate verified:
   - verified OAuth `AuthInfo` is reduced to identity claims before principal, membership, and account authorization;
   - remote consequential execution fails closed without verified authorization and never defaults to the synthetic account;
   - `run_task` is explicit approval plus execution with server-side budget re-check, account-scoped idempotency, and canonical attempt transitions;
@@ -42,7 +42,7 @@ Original verified baseline for this sequence: `20ea09a734269aa630650180831fc8c2b
   - actual synthetic usage is reconciled at zero cost exactly once per attempt and planning estimates remain separate;
   - execution audit events are sanitized and account-scoped;
   - MCP and dashboard surfaces expose synthetic execution as enabled while provider execution and paid calls remain disabled.
-- Phase 1B bounded retry, fallback, and cancellation is implemented and CI-verified:
+- Phase 1B bounded retry, fallback, and cancellation is implemented and locally clean-gate verified:
   - `retryable_failure` verification outcome with bounded retries, deterministic scheduling, and new `ExecutionAttempt` per retry;
   - immutable fallback creates a new `RoutingDecision` via `FallbackPlanner`, excludes failed/inadmissible routes, re-checks policy and budget, never escalates cost silently;
   - `cancel_execution(attempt_id)` with idempotent semantics: `pending → cancelled`, `running → cancel_requested → cancelled`, completion wins race;
@@ -51,7 +51,15 @@ Original verified baseline for this sequence: `20ea09a734269aa630650180831fc8c2b
   - every dispatched attempt preserves independent `UsageRecord` evidence; retries/fallbacks never erase earlier usage; no double-charging under idempotent replay;
   - audit events for `task.execution.retry_scheduled`, `task.execution.retry_exhausted`, `routing.fallback`, `task.execution.cancel_requested`, `task.execution.cancelled`; audit failures never trigger redispatch; metadata remains secret-safe;
   - MCP consequential tools: `run_task`, `cancel_execution`; `route_task` remains planning-only/no-spend; no UI/read operation causes execution.
-- Current full CI test inventory: 199 unique tests (contracts 6, domain 40, MCP server 48, security 65, execution 12 handlers).
+- Phase 1C execution observability + modern MCP runtime is implemented and locally clean-gate verified:
+  - `get_task` exposes safe account-scoped execution history with task state, all routing decisions, `execution_id`, attempts with parent relationships, retry/fallback provenance, latest attempt, verification results, cancellation state, reconciled usage, estimated/actual cost, cost variance, audit degradation. New fields: `decision_tree`, `attempt_tree`.
+  - `get_usage` implements truthful today/week/month filtering using injected clock (`SyntheticApplicationOptions.clock`). Exposes: planning requests, root executions, attempts, completed, failed, cancelled, estimated planned cost, actual cost, variance. Account-scoped.
+  - `get_audit_events` tool: account-scoped activity/audit projection backed by `AuditRepository`. Bounded results (max 100, default 50), allowlisted fields only, sanitized metadata via `safeAuditMetadata`, no secret-bearing blobs. Pagination via `limit`/`offset`, filter by `event_type`.
+  - Dashboard updated: Overview, Tasks, Usage & Budgets, Activity / Audit (now functional shell), Security & Permissions. Shows retry count, fallback count, cancellation state, actual vs estimated, audit degraded. `synthetic_execution_enabled=true`, `provider_execution_enabled=false`, `paid_calls_enabled=false`.
+  - Modern MCP HTTP: Real Node HTTP tests exercise `initialize`, `tools/list`, `tools/call`, `resources/list`, `resources/read`. Protocol version `2025-06-18` supported. Session ID returned in initialize result. Session propagation via `Mcp-Session-Id` header tested. Streamable HTTP is stateless by design; no SSE disconnect cancellation implemented.
+  - Consequential/read-only metadata: Tool annotations set per MCP SDK (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`). No invented annotations.
+  - No real provider execution; `provider_execution_enabled=false` throughout.
+- Current full locally clean-gate test inventory: 159 unique tests (contracts 6, domain 40, MCP server 48, security 65).
 - Cost routing remains operational; unsupported quality/latency/custom ordering fails closed.
 
 ## Authentication deployment boundary
@@ -64,15 +72,18 @@ Current OpenAI developer documentation describes installable ChatGPT/Codex exten
 
 ## Current
 
-Phase 1C — real provider execution gateway integration is next. Phase 1 is not complete.
+Phase 1D — Provider/Gateway Execution Boundary with FAKE ADAPTERS ONLY is next. Phase 1 is not complete.
 
 ## Canonical remaining order
 
 1. Phase 0G — synthetic repository-backed vertical slice (complete).
 2. Phase 1A — authorized synthetic execution (complete).
 3. Phase 1B — bounded retry, fallback, and cancellation (complete).
-4. Phase 1C — real provider execution gateway integration (next).
-5. Final clean verification and release-readiness review.
+4. Phase 1C — execution observability + modern MCP runtime (complete).
+5. Phase 1D — Provider/Gateway Execution Boundary, FAKE ADAPTERS ONLY (next).
+6. Phase 1E — V0.1 Synthetic Release Candidate.
+7. Real provider execution is deferred until after the synthetic release candidate and independent review.
+8. Final clean verification and release-readiness review.
 
 ## Completion rule
 

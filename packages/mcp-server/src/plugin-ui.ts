@@ -45,6 +45,7 @@ const pageDefinitions: Record<GPTRouterDashboardPageId, PageDefinition> = {
       'Provider execution: disabled',
       'Remote MCP: available behind configured security boundaries',
       'Data source: authoritative synthetic repository state',
+      'Retry/fallback/cancellation: implemented and audited',
     ],
   },
   router: {
@@ -70,6 +71,8 @@ const pageDefinitions: Record<GPTRouterDashboardPageId, PageDefinition> = {
       'run_task is explicit and idempotent',
       'Synthetic execution is deterministic and no-spend',
       'get_task reads the same state written by route_task',
+      'Retry/fallback/cancellation provenance tracked per attempt',
+      'execution_id stable across retry and fallback attempts',
     ],
   },
   engineering: {
@@ -121,11 +124,13 @@ const pageDefinitions: Record<GPTRouterDashboardPageId, PageDefinition> = {
     eyebrow: 'NO-SPEND SESSION',
     status: 'functional_shell',
     summary:
-      'Planning estimates are tracked separately from reconciled synthetic actual cost, which remains zero.',
+      'Planning estimates are tracked separately from reconciled synthetic actual cost, which remains zero. Time-range filtering uses injected clock.',
     items: [
       'Estimated planned cost is not actual cost',
       'Synthetic execution actual cost: zero',
       'Provider execution and paid calls remain disabled',
+      'Time filtering: today/week/month relative to server clock',
+      'execution_roots tracks unique execution IDs separately from attempts',
     ],
   },
   security_permissions: {
@@ -142,12 +147,15 @@ const pageDefinitions: Record<GPTRouterDashboardPageId, PageDefinition> = {
   },
   activity_audit: {
     label: 'Activity / Audit',
-    eyebrow: 'PLACEHOLDER',
-    status: 'placeholder',
-    summary: 'Durable production activity and audit storage is deferred.',
+    eyebrow: 'SAFE PROJECTION',
+    status: 'functional_shell',
+    summary:
+      'Account-scoped activity and audit events with sanitized metadata. No raw credential or secret material is exposed.',
     items: [
-      'Do not infer production activity from synthetic session state',
-      'No production usage ledger exists yet',
+      'Bounded results with allowlisted fields only',
+      'Metadata sanitized through safe-output boundary',
+      'Secret-bearing arbitrary blobs never serialized',
+      'Audit degradation visible when recording fails',
     ],
   },
   settings: {

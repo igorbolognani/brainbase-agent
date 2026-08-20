@@ -218,6 +218,7 @@ export interface SyntheticApplicationOptions {
   verifier?: ExecutionVerifier;
   requireAuthorizedExecution?: boolean;
   audit_failure_mode?: boolean;
+  clock?: () => Date;
 }
 
 export interface GPTRouterApplication {
@@ -248,7 +249,12 @@ export interface GPTRouterApplication {
     identity: VerifiedExecutionIdentity,
     minimumRole?: AccountMembership['role']
   ): Promise<AuthorizedExecutionContext>;
-  getAuditEvents(context?: AuthorizedExecutionContext): Promise<PublicAuditEvent[]>;
+  getAuditEvents(
+    context?: AuthorizedExecutionContext,
+    limit?: number,
+    offset?: number,
+    event_type?: string
+  ): Promise<PublicAuditEvent[]>;
   getAuditStatus(): AuditStatus;
   getSyntheticAuthorizedContext(): AuthorizedExecutionContext;
 }
@@ -855,7 +861,8 @@ function toPublicAttempt(attempt: ExecutionAttempt): PublicAttemptProjection {
 export function createSyntheticGPTRouterApplication(
   options: SyntheticApplicationOptions = {}
 ): GPTRouterApplication {
-  const repositories = createSyntheticRepositories(new Date(), {
+  const clock = options.clock ?? (() => new Date());
+  const repositories = createSyntheticRepositories(clock(), {
     audit_failure_mode: options.audit_failure_mode,
   });
   const budgetEnforcer = new BudgetEnforcer(repositories.usage);
@@ -1016,6 +1023,28 @@ export function createSyntheticGPTRouterApplication(
         audit_degraded: repositories.store.auditFailureCount > 0,
         audit_failure_count: repositories.store.auditFailureCount,
       };
+      const attemptTree = attempts.map((attempt) => ({
+        attempt_id: attempt.attempt_id,
+        execution_id: attempt.execution_id,
+        parent_attempt_id: attempt.parent_attempt_id,
+        decision_id: attempt.decision_id,
+        status: attempt.status,
+        retry_count: attempt.retry_count,
+        verification_outcome: attempt.verification_outcome,
+        failure_code: attempt.failure_code,
+        started_at: attempt.started_at?.toISOString() ?? null,
+        completed_at: attempt.completed_at?.toISOString() ?? null,
+        cancel_requested_at: attempt.cancel_requested_at?.toISOString() ?? null,
+        cancelled_at: attempt.cancelled_at?.toISOString() ?? null,
+      }));
+      const decisionTree = decisions.map((decision) => ({
+        decision_id: decision.decision_id,
+        parent_decision_id: decision.parent_decision_id ?? null,
+        fallback_reason: decision.fallback_reason ?? null,
+        selected_route_id: decision.selected_route_id,
+        estimated_cost: decision.estimated_cost,
+        decided_at: decision.decided_at.toISOString(),
+      }));
       return {
         task: {
           task_id: task.task_id,
@@ -1026,8 +1055,10 @@ export function createSyntheticGPTRouterApplication(
           created_at: task.created_at.toISOString(),
         },
         routing_decisions: decisions.map(toPublicDecision),
+        decision_tree: decisionTree,
         latest_decision: latestDecision ? toPublicDecision(latestDecision) : null,
         attempts: attempts.map(toPublicAttempt),
+        attempt_tree: attemptTree,
         latest_attempt: latestAttempt ? toPublicAttempt(latestAttempt) : null,
         execution_id: latestAttempt?.execution_id ?? null,
         retry_count: attempts.reduce((sum, attempt) => sum + attempt.retry_count, 0),
@@ -1060,7 +1091,8 @@ export function createSyntheticGPTRouterApplication(
 
     async getUsage(time_range = 'today', context) {
       const accountId = contextOrSynthetic(context).account.account_id;
-      const start = startOfRange(new Date(), time_range);
+      const now = clock();
+      const start = startOfRange(now, time_range);
       const decisions = (await decisionsForAccount(accountId)).filter(
         (decision) => decision.decided_at >= start
       );
@@ -1151,9 +1183,13 @@ export function createSyntheticGPTRouterApplication(
       return authorization.authorize(principal, identity.account_id, minimumRole);
     },
 
-    async getAuditEvents(context) {
+    async getAuditEvents(context, limit = 50, offset = 0, event_type) {
       const accountId = contextOrSynthetic(context).account.account_id;
-      const result = await repositories.audit.listEvents(accountId, { limit: 100 });
+      const result = await repositories.audit.listEvents(accountId, {
+        limit: Math.min(100, Math.max(1, limit)),
+        offset: Math.max(0, offset),
+        event_type,
+      });
       return result.events.map((event) => ({
         event_id: event.event_id,
         event_type: event.event_type,

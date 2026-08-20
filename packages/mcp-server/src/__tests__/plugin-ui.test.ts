@@ -38,6 +38,7 @@ describe('GPTRouter MCP Apps UI', () => {
       'providers_connections',
       'gateways_proxies',
       'usage_budgets',
+      'activity_audit',
     ]);
   });
 

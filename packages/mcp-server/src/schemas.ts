@@ -40,9 +40,22 @@ export const CancelExecutionInput = z.object({
   attempt_id: z.string().min(1).describe('Execution attempt ID from run_task or get_task'),
 });
 
+export const GetAuditEventsInput = z.object({
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(100)
+    .optional()
+    .describe('Maximum events to return (default 50)'),
+  offset: z.number().int().min(0).optional().describe('Pagination offset (default 0)'),
+  event_type: z.string().optional().describe('Filter by event type'),
+});
+
 export type ListModelsArgs = z.infer<typeof ListModelsInput>;
 export type RouteTaskArgs = z.infer<typeof RouteTaskInput>;
 export type GetTaskArgs = z.infer<typeof GetTaskInput>;
 export type GetUsageArgs = z.infer<typeof GetUsageInput>;
 export type RunTaskArgs = z.infer<typeof RunTaskInput>;
 export type CancelExecutionArgs = z.infer<typeof CancelExecutionInput>;
+export type GetAuditEventsArgs = z.infer<typeof GetAuditEventsInput>;
