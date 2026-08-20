@@ -27,10 +27,7 @@ describe('SafeGatewayDispatcher', () => {
       expect(request.url.hostname).toBe('gateway.example.com');
       return response(200, { 'content-type': 'application/json' }, '{"ok":true}');
     });
-    const dispatcher = new SafeGatewayDispatcher(
-      {},
-      { resolve: async () => [PUBLIC], transport }
-    );
+    const dispatcher = new SafeGatewayDispatcher({}, { resolve: async () => [PUBLIC], transport });
 
     const result = await dispatcher.dispatch({
       url: 'https://gateway.example.com/v1/test',
@@ -81,10 +78,7 @@ describe('SafeGatewayDispatcher', () => {
     const transport = vi.fn(async () =>
       response(302, { location: 'https://other.example.com/private' })
     );
-    const dispatcher = new SafeGatewayDispatcher(
-      {},
-      { resolve: async () => [PUBLIC], transport }
-    );
+    const dispatcher = new SafeGatewayDispatcher({}, { resolve: async () => [PUBLIC], transport });
 
     await expectCode(
       dispatcher.dispatch({
