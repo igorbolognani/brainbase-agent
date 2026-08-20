@@ -226,7 +226,7 @@ describe('MCP Streamable HTTP boundary', () => {
       }
     ).structuredContent;
     expect(structured.active_page).toBe('router');
-    expect(structured.data_mode).toBe('synthetic');
+    expect(structured.data_mode).toBe('synthetic_repository');
     expect(structured.safety.provider_execution_enabled).toBe(false);
     expect(structured.safety.paid_calls_enabled).toBe(false);
   });
@@ -258,6 +258,197 @@ describe('MCP Streamable HTTP boundary', () => {
 
     expect(decision.status).toBe('planning');
     expect(decision.estimated_cost).toBeGreaterThanOrEqual(0);
-    expect(decision.note).toContain('No execution or spending occurs');
+    expect(decision.note).toContain('No provider execution or spending occurs');
+  });
+
+  it('runs the full Phase 0G repository-backed vertical slice over real HTTP', async () => {
+    const listResult = await post(port, {
+      jsonrpc: '2.0',
+      id: 'slice-list',
+      method: 'tools/call',
+      params: { name: 'list_models', arguments: {} },
+    });
+    expect(listResult.status).toBe(200);
+    const listRpc = parseRpcBody(listResult.body);
+    expect(listRpc.error).toBeUndefined();
+    const listContent = (listRpc.result as { content: Array<{ type: string; text: string }> })
+      .content;
+    const listOutput = JSON.parse(listContent[0].text) as {
+      data_mode: string;
+      account_id: string;
+      models: Array<{
+        route_id: string;
+        source_id: string;
+        source_provider: string;
+        provenance: string;
+        pricing: { source: string };
+        capabilities: string[];
+      }>;
+    };
+    expect(listOutput.data_mode).toBe('synthetic_repository');
+    expect(listOutput.account_id).toBe('account-synthetic-v0');
+    expect(listOutput.models).toHaveLength(2);
+    expect(listOutput.models.every((model) => model.provenance === 'synthetic_repository')).toBe(
+      true
+    );
+    expect(listOutput.models.every((model) => model.source_id.startsWith('synthetic-'))).toBe(true);
+    expect(listOutput.models.some((model) => model.route_id === 'route-synthetic-text-free')).toBe(
+      true
+    );
+
+    const planResult = await post(port, {
+      jsonrpc: '2.0',
+      id: 'slice-plan',
+      method: 'tools/call',
+      params: {
+        name: 'route_task',
+        arguments: {
+          description: 'Phase 0G vertical slice task',
+          required_capabilities: ['text', 'vision'],
+          ordering_strategy: 'cost',
+        },
+      },
+    });
+    expect(planResult.status).toBe(200);
+    const planRpc = parseRpcBody(planResult.body);
+    expect(planRpc.error).toBeUndefined();
+    const planContent = (planRpc.result as { content: Array<{ type: string; text: string }> })
+      .content;
+    const plan = JSON.parse(planContent[0].text) as {
+      task_id: string;
+      decision_id: string;
+      status: string;
+      data_mode: string;
+      actual_cost: number;
+      estimated_cost: number;
+      selected_route: { route_id: string } | null;
+      note: string;
+    };
+    expect(plan.status).toBe('planning');
+    expect(plan.data_mode).toBe('synthetic_repository');
+    expect(plan.actual_cost).toBe(0);
+    expect(plan.estimated_cost).toBeGreaterThan(0);
+    expect(plan.selected_route?.route_id).toBe('route-synthetic-multimodal-cheap');
+    expect(plan.note).toContain('No provider execution or spending occurs');
+
+    const getResult = await post(port, {
+      jsonrpc: '2.0',
+      id: 'slice-get',
+      method: 'tools/call',
+      params: { name: 'get_task', arguments: { task_id: plan.task_id } },
+    });
+    expect(getResult.status).toBe(200);
+    const getRpc = parseRpcBody(getResult.body);
+    expect(getRpc.error).toBeUndefined();
+    const getContent = (getRpc.result as { content: Array<{ type: string; text: string }> })
+      .content;
+    const task = JSON.parse(getContent[0].text) as {
+      task: { task_id: string; account_id: string; description: string; status: string };
+      latest_decision: {
+        decision_id: string;
+        selected_route_id: string | null;
+        estimated_cost: number | null;
+      };
+      actual_cost: number;
+      execution_status: string;
+      data_mode: string;
+    };
+    expect(task.task.task_id).toBe(plan.task_id);
+    expect(task.task.account_id).toBe('account-synthetic-v0');
+    expect(task.task.status).toBe('planning');
+    expect(task.latest_decision.decision_id).toBe(plan.decision_id);
+    expect(task.latest_decision.selected_route_id).toBe(plan.selected_route?.route_id ?? null);
+    expect(task.actual_cost).toBe(0);
+    expect(task.execution_status).toBe('not_started');
+    expect(task.data_mode).toBe('synthetic_repository');
+
+    const usageResult = await post(port, {
+      jsonrpc: '2.0',
+      id: 'slice-usage',
+      method: 'tools/call',
+      params: { name: 'get_usage', arguments: { time_range: 'today' } },
+    });
+    expect(usageResult.status).toBe(200);
+    const usageRpc = parseRpcBody(usageResult.body);
+    expect(usageRpc.error).toBeUndefined();
+    const usageContent = (usageRpc.result as { content: Array<{ type: string; text: string }> })
+      .content;
+    const usage = JSON.parse(usageContent[0].text) as {
+      planning_requests: number;
+      execution_requests: number;
+      actual_cost: number;
+      estimated_planned_cost: number;
+      actual_usage_records: number;
+      data_mode: string;
+    };
+    expect(usage.planning_requests).toBe(1);
+    expect(usage.execution_requests).toBe(0);
+    expect(usage.actual_usage_records).toBe(0);
+    expect(usage.actual_cost).toBe(0);
+    expect(usage.estimated_planned_cost).toBeCloseTo(plan.estimated_cost, 6);
+    expect(usage.data_mode).toBe('synthetic_repository');
+
+    const dashResult = await post(port, {
+      jsonrpc: '2.0',
+      id: 'slice-dash',
+      method: 'tools/call',
+      params: { name: 'render_gptrouter_dashboard', arguments: { active_page: 'tasks' } },
+    });
+    expect(dashResult.status).toBe(200);
+    const dashRpc = parseRpcBody(dashResult.body);
+    expect(dashRpc.error).toBeUndefined();
+    const dashboard = (
+      dashRpc.result as {
+        structuredContent: {
+          data_mode: string;
+          active_page: string;
+          runtime: {
+            route_count: number;
+            task_count: number;
+            decision_count: number;
+            execution_count: number;
+            actual_spend: number;
+            estimated_planned_cost: number;
+          };
+          safety: { provider_execution_enabled: boolean; paid_calls_enabled: boolean };
+        };
+      }
+    ).structuredContent;
+    expect(dashboard.data_mode).toBe('synthetic_repository');
+    expect(dashboard.active_page).toBe('tasks');
+    expect(dashboard.runtime.route_count).toBe(2);
+    expect(dashboard.runtime.task_count).toBe(1);
+    expect(dashboard.runtime.decision_count).toBe(1);
+    expect(dashboard.runtime.execution_count).toBe(0);
+    expect(dashboard.runtime.actual_spend).toBe(0);
+    expect(dashboard.runtime.estimated_planned_cost).toBeCloseTo(plan.estimated_cost, 6);
+    expect(dashboard.safety.provider_execution_enabled).toBe(false);
+    expect(dashboard.safety.paid_calls_enabled).toBe(false);
+
+    const allOutputs = [
+      listResult.body,
+      planResult.body,
+      getResult.body,
+      usageResult.body,
+      dashResult.body,
+    ].join(' ');
+    expect(allOutputs).not.toContain('opaque-synthetic-reference');
+    expect(allOutputs).not.toContain('credential_reference');
+
+    const toolsResult = await post(port, {
+      jsonrpc: '2.0',
+      id: 'slice-tools',
+      method: 'tools/list',
+    });
+    expect(toolsResult.status).toBe(200);
+    const toolsRpc = parseRpcBody(toolsResult.body);
+    const toolNames = (toolsRpc.result as { tools: Array<{ name: string }> }).tools.map(
+      (tool) => tool.name
+    );
+    expect(toolNames).not.toContain('run_task');
+    expect(toolNames).toContain('list_models');
+    expect(toolNames).toContain('route_task');
+    expect(toolNames).toContain('get_task');
+    expect(toolNames).toContain('get_usage');
   });
 });
