@@ -24,6 +24,7 @@ Generated `dist/` and `*.tsbuildinfo` outputs must not be tracked.
 ## Targeted gates by phase
 
 ### Remote MCP
+
 - local mode remains loopback-protected;
 - remote mode refuses incomplete security configuration;
 - disallowed Host/Origin rejected before MCP dispatch;
@@ -32,6 +33,7 @@ Generated `dist/` and `*.tsbuildinfo` outputs must not be tracked.
 - `route_task` proven no-spend.
 
 ### Gateway dispatch / SSRF
+
 - HTTPS only;
 - IPv4/IPv6/mapped address canonicalization;
 - all DNS answers checked;
@@ -41,11 +43,13 @@ Generated `dist/` and `*.tsbuildinfo` outputs must not be tracked.
 - timeout and redirect cap enforced.
 
 ### Auth / tenancy / secrets
+
 - active membership required at account service boundary;
 - suspended/revoked/cross-account denied;
 - model-visible/MCP/log/audit serializers do not expose secrets or vault paths.
 
 ### UI / vertical slice
+
 - canonical navigation renders;
 - state comes from canonical backend projections;
 - mocked/synthetic state is visibly identified;
