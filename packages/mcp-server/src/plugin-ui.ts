@@ -135,7 +135,10 @@ const pageDefinitions: Record<GPTRouterDashboardPageId, PageDefinition> = {
     eyebrow: 'PLACEHOLDER',
     status: 'placeholder',
     summary: 'Durable activity and audit storage is deferred.',
-    items: ['Do not infer activity from synthetic UI state', 'No production usage ledger exists yet'],
+    items: [
+      'Do not infer activity from synthetic UI state',
+      'No production usage ledger exists yet',
+    ],
   },
   settings: {
     label: 'Settings',
