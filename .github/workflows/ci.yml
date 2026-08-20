@@ -42,8 +42,7 @@ jobs:
       - name: Format check
         run: |
           set -euo pipefail
-          npm run format
-          git diff --exit-code
+          npm run format:check
 
       - name: Lint
         run: |
