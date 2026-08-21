@@ -1,0 +1,30 @@
+{
+  "name": "@gptrouter/persistence",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc --build",
+    "typecheck": "tsc --build --force",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@gptrouter/contracts": "0.1.0",
+    "better-sqlite3": "^13.0.3",
+    "drizzle-orm": "^0.45.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^20.17.10",
+    "typescript": "^5.7.2",
+    "vitest": "^4.1.11"
+  }
+}
