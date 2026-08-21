@@ -11,6 +11,7 @@ import type {
   ProviderExecutionRequest,
   ProviderExecutionResult,
   ProviderErrorClassification,
+  CredentialResolver,
 } from './provider-adapter.js';
 import type { ExecutionCancellationResult } from './execution-coordinator.js';
 
@@ -18,9 +19,13 @@ export interface GeminiAdapterOptions {
   baseUrl?: string;
   fetch?: typeof globalThis.fetch;
   timeout_ms?: number;
+  credentialResolver: CredentialResolver;
 }
 
-function classifyGeminiError(status: number, body: Record<string, unknown>): {
+function classifyGeminiError(
+  status: number,
+  body: Record<string, unknown>
+): {
   classification: ProviderErrorClassification;
   retryable: boolean;
 } {
@@ -29,10 +34,14 @@ function classifyGeminiError(status: number, body: Record<string, unknown>): {
   const message = typeof errorObj?.message === 'string' ? errorObj.message : '';
 
   if (code === 429) return { classification: 'rate_limited', retryable: true };
-  if (code === 408 || message.toLowerCase().includes('timeout')) return { classification: 'timeout', retryable: true };
+  if (code === 408 || message.toLowerCase().includes('timeout'))
+    return { classification: 'timeout', retryable: true };
   if (code >= 500) return { classification: 'provider_unavailable', retryable: true };
   if (code === 401 || code === 403) {
-    return { classification: code === 401 ? 'authentication_failed' : 'authorization_failed', retryable: false };
+    return {
+      classification: code === 401 ? 'authentication_failed' : 'authorization_failed',
+      retryable: false,
+    };
   }
   if (code === 400) return { classification: 'invalid_request', retryable: false };
   return { classification: 'unknown_provider_error', retryable: false };
@@ -43,16 +52,20 @@ export class GeminiAdapter implements ProviderAdapter {
   private readonly baseUrl: string;
   private readonly fetchFn: typeof globalThis.fetch;
   private readonly timeout_ms: number;
+  private readonly credentialResolver: CredentialResolver;
 
-  constructor(options: GeminiAdapterOptions = {}) {
+  constructor(options: GeminiAdapterOptions) {
     this.baseUrl = options.baseUrl ?? 'https://generativelanguage.googleapis.com';
     this.fetchFn = options.fetch ?? globalThis.fetch;
     this.timeout_ms = options.timeout_ms ?? 60_000;
+    this.credentialResolver = options.credentialResolver;
   }
 
   async execute(request: ProviderExecutionRequest): Promise<ProviderExecutionResult> {
-    const apiKey = request._credential;
-    if (!apiKey) {
+    let apiKey: string;
+    try {
+      apiKey = await this.credentialResolver.resolveCredential(request.connection_id);
+    } catch {
       return {
         success: false,
         output: null,
@@ -60,7 +73,7 @@ export class GeminiAdapter implements ProviderAdapter {
         source_id: request.source_id,
         route_id: request.route_id,
         connection_id: request.connection_id,
-        error_classification: 'authentication_failed',
+        error_classification: 'credential_missing',
         error_message: 'No credential resolved for Gemini adapter',
         is_retryable: false,
         tokens_used: null,
@@ -69,7 +82,7 @@ export class GeminiAdapter implements ProviderAdapter {
       };
     }
 
-    const url = `${this.baseUrl}/v1beta/models/${request.source_id}:generateContent?key=${apiKey}`;
+    const url = `${this.baseUrl}/v1beta/models/${request.source_id}:generateContent`;
     const { systemInstruction, contents } = translateToGeminiFormat(request.task_input);
 
     const body: Record<string, unknown> = { contents };
@@ -84,7 +97,10 @@ export class GeminiAdapter implements ProviderAdapter {
     try {
       response = await this.fetchFn(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': apiKey,
+        },
         body: JSON.stringify(body),
         signal: controller.signal,
       });
@@ -99,10 +115,12 @@ export class GeminiAdapter implements ProviderAdapter {
         route_id: request.route_id,
         connection_id: request.connection_id,
         error_classification: isAbort ? 'timeout' : 'provider_unavailable',
-        error_message: isAbort ? 'Request timed out' : `Network error: ${error instanceof Error ? error.message : 'unknown'}`,
+        error_message: isAbort
+          ? 'Request timed out'
+          : `Network error: ${error instanceof Error ? error.message : 'unknown'}`,
         is_retryable: true,
         tokens_used: null,
-        actual_cost: 0,
+        actual_cost: null,
         cost_breakdown: { error: isAbort ? 'timeout' : 'network' },
       };
     } finally {
@@ -122,10 +140,11 @@ export class GeminiAdapter implements ProviderAdapter {
         route_id: request.route_id,
         connection_id: request.connection_id,
         error_classification: classification,
-        error_message: typeof errorObj?.message === 'string' ? errorObj.message : `HTTP ${response.status}`,
+        error_message:
+          typeof errorObj?.message === 'string' ? errorObj.message : `HTTP ${response.status}`,
         is_retryable: retryable,
         tokens_used: extractGeminiUsage(responseBody),
-        actual_cost: 0,
+        actual_cost: null,
         cost_breakdown: { error: classification },
       };
     }
@@ -135,15 +154,15 @@ export class GeminiAdapter implements ProviderAdapter {
 
     return {
       success: true,
-      output: { content, raw: responseBody },
+      output: { content },
       provider: this.provider,
       source_id: request.source_id,
       route_id: request.route_id,
       connection_id: request.connection_id,
       is_retryable: false,
       tokens_used: usage,
-      actual_cost: 0,
-      cost_breakdown: { provider: 'google', actual_cost: 0 },
+      actual_cost: null,
+      cost_breakdown: { provider: 'google', actual_cost: null },
     };
   }
 
@@ -156,14 +175,16 @@ function translateToGeminiFormat(taskInput: Record<string, unknown>): {
   systemInstruction: string | null;
   contents: Array<{ role: string; parts: Array<{ text: string }> }>;
 } {
-  const systemInstruction = typeof taskInput.system_prompt === 'string' ? taskInput.system_prompt : null;
-  const userMessage = typeof taskInput.message === 'string'
-    ? taskInput.message
-    : typeof taskInput.prompt === 'string'
-      ? taskInput.prompt
-      : typeof taskInput.description === 'string'
-        ? taskInput.description
-        : JSON.stringify(taskInput);
+  const systemInstruction =
+    typeof taskInput.system_prompt === 'string' ? taskInput.system_prompt : null;
+  const userMessage =
+    typeof taskInput.message === 'string'
+      ? taskInput.message
+      : typeof taskInput.prompt === 'string'
+        ? taskInput.prompt
+        : typeof taskInput.description === 'string'
+          ? taskInput.description
+          : JSON.stringify(taskInput);
 
   return {
     systemInstruction,
@@ -181,10 +202,14 @@ function extractGeminiContent(body: Record<string, unknown>): string {
   return typeof parts[0].text === 'string' ? parts[0].text : '';
 }
 
-function extractGeminiUsage(body: Record<string, unknown>): { input: number; output: number } | null {
+function extractGeminiUsage(
+  body: Record<string, unknown>
+): { input: number; output: number } | null {
   const usageMetadata = body.usageMetadata as Record<string, unknown> | undefined;
   if (!usageMetadata) return null;
-  const inputTokens = typeof usageMetadata.promptTokenCount === 'number' ? usageMetadata.promptTokenCount : 0;
-  const outputTokens = typeof usageMetadata.candidatesTokenCount === 'number' ? usageMetadata.candidatesTokenCount : 0;
+  const inputTokens =
+    typeof usageMetadata.promptTokenCount === 'number' ? usageMetadata.promptTokenCount : 0;
+  const outputTokens =
+    typeof usageMetadata.candidatesTokenCount === 'number' ? usageMetadata.candidatesTokenCount : 0;
   return { input: inputTokens, output: outputTokens };
 }

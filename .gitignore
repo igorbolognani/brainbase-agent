@@ -30,6 +30,10 @@ Thumbs.db
 coverage/
 .nyc_output/
 
+# Prisma
+node_modules/.prisma/
+generated/
+
 # Temporary
 tmp/
 temp/

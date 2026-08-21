@@ -12,6 +12,7 @@ import type {
   ProviderExecutionRequest,
   ProviderExecutionResult,
   ProviderErrorClassification,
+  CredentialResolver,
 } from './provider-adapter.js';
 import type { ExecutionCancellationResult } from './execution-coordinator.js';
 
@@ -20,9 +21,13 @@ export interface OpenAICompatibleAdapterOptions {
   baseUrl: string; // Trusted server-side configured endpoint
   fetch?: typeof globalThis.fetch;
   timeout_ms?: number;
+  credentialResolver: CredentialResolver;
 }
 
-function classifyOpenAIError(status: number, body: Record<string, unknown>): {
+function classifyOpenAIError(
+  status: number,
+  body: Record<string, unknown>
+): {
   classification: ProviderErrorClassification;
   retryable: boolean;
 } {
@@ -40,15 +45,19 @@ function classifyOpenAIError(status: number, body: Record<string, unknown>): {
   }
   if (status === 401 || status === 403) {
     const isAuth = status === 401;
-    return { classification: isAuth ? 'authentication_failed' : 'authorization_failed', retryable: false };
+    return {
+      classification: isAuth ? 'authentication_failed' : 'authorization_failed',
+      retryable: false,
+    };
   }
   if (status === 400) {
     const msgLower = message.toLowerCase();
     if (msgLower.includes('context') || msgLower.includes('token') || msgLower.includes('length')) {
-      return { classification: 'invalid_request', retryable: false };
+      return { classification: 'context_limit', retryable: false };
     }
     return { classification: 'invalid_request', retryable: false };
   }
+  if (status === 402) return { classification: 'insufficient_balance', retryable: false };
   return { classification: 'unknown_provider_error', retryable: false };
 }
 
@@ -57,15 +66,18 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
   private readonly baseUrl: string;
   private readonly fetchFn: typeof globalThis.fetch;
   private readonly timeout_ms: number;
+  private readonly credentialResolver: CredentialResolver;
 
   constructor(options: OpenAICompatibleAdapterOptions) {
     this.provider = options.provider;
     this.baseUrl = options.baseUrl.replace(/\/+$/, '');
     this.fetchFn = options.fetch ?? globalThis.fetch;
     this.timeout_ms = options.timeout_ms ?? 60_000;
+    this.credentialResolver = options.credentialResolver;
   }
 
   async execute(request: ProviderExecutionRequest): Promise<ProviderExecutionResult> {
+    const credential = await this.credentialResolver.resolveCredential(request.connection_id);
     const url = `${this.baseUrl}/v1/chat/completions`;
 
     const messages = buildMessages(request.task_input);
@@ -85,7 +97,7 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${request._credential}`,
+          Authorization: `Bearer ${credential}`,
         },
         body: JSON.stringify(body),
         signal: controller.signal,
@@ -132,7 +144,8 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
     if (!response.ok) {
       const { classification, retryable } = classifyOpenAIError(response.status, responseBody);
       const errorObj = responseBody.error as Record<string, unknown> | undefined;
-      const message = typeof errorObj?.message === 'string' ? errorObj.message : `HTTP ${response.status}`;
+      const message =
+        typeof errorObj?.message === 'string' ? errorObj.message : `HTTP ${response.status}`;
 
       return {
         success: false,
@@ -157,7 +170,7 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
 
     return {
       success: true,
-      output: { content: outputText, raw: responseBody },
+      output: { content: outputText },
       provider: this.provider,
       source_id: request.source_id,
       route_id: request.route_id,
@@ -165,19 +178,24 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
       provider_request_id: response.headers.get('x-request-id') ?? undefined,
       is_retryable: false,
       tokens_used: usage,
-      actual_cost: cost.total,
+      actual_cost: cost.known ? cost.total : null,
       cost_breakdown: cost,
     };
   }
 
-  async cancel(connection_id: string, provider_request_id: string): Promise<ExecutionCancellationResult> {
+  async cancel(
+    connection_id: string,
+    provider_request_id: string
+  ): Promise<ExecutionCancellationResult> {
     void connection_id;
     void provider_request_id;
     return 'not_supported';
   }
 }
 
-function buildMessages(taskInput: Record<string, unknown>): Array<{ role: string; content: string }> {
+function buildMessages(
+  taskInput: Record<string, unknown>
+): Array<{ role: string; content: string }> {
   const messages: Array<{ role: string; content: string }> = [];
 
   const systemPrompt = taskInput.system_prompt ?? taskInput.system;
@@ -216,19 +234,17 @@ function extractUsage(body: Record<string, unknown>): { input: number; output: n
 function estimateCost(
   model: string,
   usage: { input: number; output: number } | null
-): { total: number; input: number; output: number } {
-  if (!usage) return { total: 0, input: 0, output: 0 };
+): { known: boolean; total: number; input: number; output: number } {
+  if (!usage) return { known: true, total: 0, input: 0, output: 0 };
 
-  // Cost estimation is version-aware and model-specific.
-  // In production this would come from a pricing catalog.
-  // For safety: unknown models return zero cost (unknown, not fake zero).
-  const inputPer1k = MODEL_PRICING[model]?.input ?? 0;
-  const outputPer1k = MODEL_PRICING[model]?.output ?? 0;
+  const pricing = MODEL_PRICING[model];
+  if (!pricing) return { known: false, total: 0, input: 0, output: 0 };
 
-  const inputCost = (usage.input / 1000) * inputPer1k;
-  const outputCost = (usage.output / 1000) * outputPer1k;
+  const inputCost = (usage.input / 1000) * pricing.input;
+  const outputCost = (usage.output / 1000) * pricing.output;
 
   return {
+    known: true,
     total: inputCost + outputCost,
     input: inputCost,
     output: outputCost,
@@ -239,7 +255,12 @@ function estimateCost(
 // NOT hardcoded as canonical truth — this is a reference snapshot.
 const MODEL_PRICING: Record<string, { input: number; output: number; source?: string }> = {};
 
-export function registerModelPricing(model: string, input: number, output: number, source?: string): void {
+export function registerModelPricing(
+  model: string,
+  input: number,
+  output: number,
+  source?: string
+): void {
   MODEL_PRICING[model] = { input, output, source };
 }
 

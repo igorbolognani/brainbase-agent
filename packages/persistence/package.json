@@ -14,12 +14,18 @@
     "build": "tsc --build",
     "typecheck": "tsc --build --force",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "prisma:validate": "npx prisma validate",
+    "prisma:generate": "npx prisma generate",
+    "prisma:migrate:check": "npx prisma migrate diff --from-empty --to-schema-datamodel prisma/schema.prisma --script"
   },
   "dependencies": {
     "@gptrouter/contracts": "0.1.0",
+    "@gptrouter/security": "0.1.0",
+    "@prisma/client": "^7.9.1",
     "better-sqlite3": "^13.0.3",
-    "drizzle-orm": "^0.45.0"
+    "drizzle-orm": "^0.45.0",
+    "prisma": "^7.9.1"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",

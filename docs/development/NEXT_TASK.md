@@ -1,57 +1,64 @@
 # Next Task
 
-## Phase 1D — COMPLETE
+## Phase 2/3 — CORRECTIVE CHECKPOINT COMPLETE
 
-Provider/Gateway Execution Boundary with FAKE ADAPTERS ONLY has been implemented and verified:
+Clean branch `work/phase-2-3-production-clean` based on Phase 3 baseline (`8fdc699`).
+No Phase 4 code present.
 
-- `ProviderAdapter` / `ProviderAdapterRegistry` execution seam
-- `FakeProviderAdapter` with deterministic outcomes: SUCCESS, RETRYABLE_FAILURE, TERMINAL_FAILURE, TIMEOUT, RATE_LIMIT, UNAVAILABLE, HOLD, CANCELLATION
-- Opaque connection references only — no credentials in execution requests
-- `AdapterExecutionCoordinatorBridge` + `AdapterExecutionVerifier` integration
-- All Phase 1B retry/fallback/cancellation semantics preserved
-- Security: unknown adapter fails closed, account isolation, secret-safe projections
-- Feature gate: `provider_execution_enabled: false`, `paid_calls_enabled: false`
+### What was corrected:
 
-## Phase 1E — COMPLETE
+1. **Persistence**: PostgreSQL + Prisma as canonical production target
+   - Prisma schema with JSONB, distinct ProviderConnection/GatewayConnection, Execution record
+   - `prisma validate` and `prisma generate` pass
+   - SQLite/Drizzle retained as test/dev adapter
 
-V0.1 Synthetic Release Candidate verified:
+2. **Execution model**: Root Execution record with idempotency
+   - `UNIQUE(account_id, idempotency_key)` on Execution (not ExecutionAttempt)
+   - ExecutionAttempt linked via execution_id for retry/fallback
 
-- Integrated synthetic E2E flow: authorize -> plan -> route -> execute -> fake adapter -> verify -> reconcile -> audit -> projections
-- Failure/degradation paths: retry exhaustion, fallback denial, cancellation, audit degradation, invalid provider, budget denial
-- MCP surface: initialize, tools/list, resources/list/read, route_task, run_task, get_task, get_usage, get_audit_events, cancel_execution, dashboard
-- Product projections truthful: decisions, attempts, retries, fallback, cancellation, usage, actual vs estimated, audit, feature flags
-- 193 total tests passing (contracts 6, domain 45, MCP server 77, security 65)
+3. **Authentication**: jose-based JWT verification
+   - Moved to `@gptrouter/security` package
+   - Real cryptographic signature verification
+   - Injectable JWKS resolution
 
-## NEXT PHASE — Real Provider Execution (Deferred)
+4. **Provider runtime separation**: `@gptrouter/provider-runtime` package
+   - Trusted provider endpoint registry
+   - CredentialResolver wiring
+   - Adapters remain in domain (re-exported by provider-runtime)
 
-Per the canonical roadmap, real provider execution is deferred until after the synthetic release candidate and independent review.
+5. **Credential boundary**: CredentialResolver interface
+   - Removed `_credential` from ProviderExecutionRequest
+   - Removed `gateway_url` from ProviderExecutionRequest
+   - Server-side credential resolution only
 
-### Potential next vertical slice candidates (to be determined by architectural review):
+6. **Cost semantics**: `actual_cost: number | null`
+   - null = unknown cost, 0 = known zero cost
 
-1. **Durable repository persistence** — Replace in-memory repositories with persistent storage (PostgreSQL, etc.)
-2. **Real credential-resolution seam** — Implement `ProviderConnection` / `GatewayConnection` credential resolution via secure OAuth/OIDC or encrypted storage
-3. **Private gateway bridge** — Local/private gateway execution for self-hosted models
-4. **Real provider execution under explicit feature gate** — Enable `provider_execution_enabled: true` with real adapters (OpenAI, Anthropic, OpenRouter, etc.)
-5. **Stronger deployment auth/OAuth verification** — Production-grade OAuth resource server with concrete verifier
-6. **Workflow composition** — Multi-step task orchestration
+7. **PostgreSQL integration tests**: 10 tests via Docker
 
-### Prerequisites for real provider execution:
+### Test results:
 
-- Independent security review of credential boundaries and SSRF protection
-- Durable persistence layer for audit/usage/replay durability
-- Production deployment configuration (OAuth verifier, secrets management)
-- Explicit feature gate `provider_execution_enabled: true` with clear documentation
-- Cost monitoring and alerting for paid provider calls
+- 268 tests passing (all packages)
+- Full clean gate verified locally
+- Prisma validate and generate pass
+- PostgreSQL integration tests pass
 
-### What MUST NOT be done yet:
+### What this checkpoint does NOT include:
 
-- ❌ No real provider SDK integration
-- ❌ No paid API calls
-- ❌ No production credential storage in repository
-- ❌ No bypass of budget/policy enforcement
-- ❌ No merge to main branch
-- ❌ No changes to authentication deployment boundary
+- No Phase 4 work
+- No live provider calls
+- No merge to main
 
-### Recommended next step:
+## NEXT PHASE — Phase 4: Intelligent Routing (NOT STARTED)
 
-Architectural review to select the smallest logical next vertical slice based on dependencies and risk. Durable persistence is likely the highest-leverage prerequisite for production readiness.
+Phase 4 has NOT been started. The existing commits `4692f34` (feat(phase4)) exist on
+the old branch `work/phase-2-productionization` for later reapplication and review,
+but are NOT part of this clean branch.
+
+### Potential Phase 4 candidates:
+
+1. Evidence-based routing (quality/latency ordering)
+2. Model catalog with dynamic pricing
+3. Benchmark ingester for quality metrics
+4. Performance metadata collection
+5. Balanced routing strategy

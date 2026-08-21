@@ -10,4 +10,4 @@ export * from './database.js';
 export * from './converters.js';
 export * from './repositories.js';
 export * from './credential-store.js';
-export * from './auth-verifier.js';
+export * from '@gptrouter/security/auth-verifier.js';

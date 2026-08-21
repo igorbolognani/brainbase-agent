@@ -13,10 +13,11 @@ export interface ProviderExecutionRequest {
   route_id: string;
   source_id: string; // Model identifier, e.g. 'gpt-4o'
   route_type: 'provider' | 'gateway';
-  gateway_url?: string;
   task_input: Record<string, unknown>;
-  /** Server-side resolved credential. NEVER exposed to MCP/UI/logs. */
-  _credential?: string;
+}
+
+export interface CredentialResolver {
+  resolveCredential(connection_id: string): Promise<string>;
 }
 
 export type ProviderErrorClassification =
@@ -27,7 +28,11 @@ export type ProviderErrorClassification =
   | 'authentication_failed'
   | 'authorization_failed'
   | 'cancelled'
-  | 'unknown_provider_error';
+  | 'unknown_provider_error'
+  | 'context_limit'
+  | 'insufficient_balance'
+  | 'credential_missing'
+  | 'credential_revoked';
 
 export interface ProviderExecutionResult {
   success: boolean;
@@ -44,7 +49,7 @@ export interface ProviderExecutionResult {
     input: number;
     output: number;
   } | null;
-  actual_cost: number;
+  actual_cost: number | null;
   cost_breakdown: Record<string, unknown>;
 }
 
@@ -96,7 +101,12 @@ export class FakeProviderAdapter implements ProviderAdapter {
     const outcome = this.options.outcome ?? 'success';
 
     // Verify credential or raw secrets are NOT present
-    if ('api_key' in request || 'secret' in request || 'access_token' in request) {
+    if (
+      '_credential' in request ||
+      'api_key' in request ||
+      'secret' in request ||
+      'access_token' in request
+    ) {
       throw new Error('SECURITY_VIOLATION: Raw credential passed in execution request');
     }
 
@@ -194,6 +204,7 @@ export class DefaultProviderAdapterRegistry implements ProviderAdapterRegistry {
 
 export interface AdapterExecutionCoordinatorBridgeOptions {
   registry: ProviderAdapterRegistry;
+  credentialResolver: CredentialResolver;
 }
 
 export class AdapterExecutionCoordinatorBridge implements ExecutionExecutor {
@@ -222,6 +233,9 @@ export class AdapterExecutionCoordinatorBridge implements ExecutionExecutor {
       };
     }
 
+    // Resolve credential server-side before adapter call; adapters must obtain via CredentialResolver
+    await this.options.credentialResolver.resolveCredential(snapshot.connection_id);
+
     const request: ProviderExecutionRequest = {
       connection_id: snapshot.connection_id,
       provider,
@@ -246,7 +260,7 @@ export class AdapterExecutionCoordinatorBridge implements ExecutionExecutor {
           route_id: result.route_id,
           connection_id: result.connection_id,
         },
-        actual_cost: result.actual_cost,
+        actual_cost: result.actual_cost ?? 0,
         cost_breakdown: result.cost_breakdown,
         tokens_used: result.tokens_used,
       };
@@ -263,7 +277,7 @@ export class AdapterExecutionCoordinatorBridge implements ExecutionExecutor {
         connection_id: result.connection_id,
         provider_request_id: result.provider_request_id,
       },
-      actual_cost: result.actual_cost,
+      actual_cost: result.actual_cost ?? 0,
       cost_breakdown: result.cost_breakdown,
       tokens_used: result.tokens_used,
     };

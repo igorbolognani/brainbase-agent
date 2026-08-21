@@ -8,6 +8,16 @@ import { GeminiAdapter } from '../gemini-adapter.js';
 import { ProviderHealthTracker } from '../provider-health.js';
 import type { ProviderExecutionRequest } from '../provider-adapter.js';
 
+const mockCredentialResolver = { resolveCredential: async () => 'test-api-key' } as const;
+
+function failingCredentialResolver(): { resolveCredential: () => Promise<never> } {
+  return {
+    resolveCredential: async () => {
+      throw new Error('credential_missing');
+    },
+  };
+}
+
 function makeRequest(overrides: Partial<ProviderExecutionRequest> = {}): ProviderExecutionRequest {
   return {
     connection_id: 'conn-1',
@@ -16,14 +26,16 @@ function makeRequest(overrides: Partial<ProviderExecutionRequest> = {}): Provide
     source_id: 'gpt-4o',
     route_type: 'provider',
     task_input: { message: 'Hello' },
-    _credential: 'test-api-key',
     ...overrides,
   };
 }
 
-function mockFetch(
-  response: { ok: boolean; status: number; body: unknown; headers?: Record<string, string> }
-): typeof globalThis.fetch {
+function mockFetch(response: {
+  ok: boolean;
+  status: number;
+  body: unknown;
+  headers?: Record<string, string>;
+}): typeof globalThis.fetch {
   return vi.fn().mockResolvedValue({
     ok: response.ok,
     status: response.status,
@@ -45,6 +57,7 @@ describe('OpenAICompatibleAdapter', () => {
       provider: 'openrouter',
       baseUrl: 'https://openrouter.ai/api',
       timeout_ms: 5000,
+      credentialResolver: mockCredentialResolver,
     });
   });
 
@@ -62,11 +75,12 @@ describe('OpenAICompatibleAdapter', () => {
       provider: 'openrouter',
       baseUrl: 'https://openrouter.ai/api',
       fetch,
+      credentialResolver: mockCredentialResolver,
     });
 
     const result = await adapter.execute(makeRequest());
     expect(result.success).toBe(true);
-    expect(result.output).toEqual({ content: 'Hello back!', raw: expect.any(Object) } as Record<string, unknown>);
+    expect(result.output).toEqual({ content: 'Hello back!' });
     expect(result.tokens_used).toEqual({ input: 10, output: 5 });
     expect(result.provider_request_id).toBe('req-123');
   });
@@ -81,6 +95,7 @@ describe('OpenAICompatibleAdapter', () => {
       provider: 'openrouter',
       baseUrl: 'https://openrouter.ai/api',
       fetch,
+      credentialResolver: mockCredentialResolver,
     });
 
     const result = await adapter.execute(makeRequest());
@@ -99,6 +114,7 @@ describe('OpenAICompatibleAdapter', () => {
       provider: 'openrouter',
       baseUrl: 'https://openrouter.ai/api',
       fetch,
+      credentialResolver: mockCredentialResolver,
     });
 
     const result = await adapter.execute(makeRequest());
@@ -117,6 +133,7 @@ describe('OpenAICompatibleAdapter', () => {
       provider: 'openrouter',
       baseUrl: 'https://openrouter.ai/api',
       fetch,
+      credentialResolver: mockCredentialResolver,
     });
 
     const result = await adapter.execute(makeRequest());
@@ -126,14 +143,15 @@ describe('OpenAICompatibleAdapter', () => {
   });
 
   it('handles timeout', async () => {
-    const fetch = vi.fn().mockRejectedValue(
-      new DOMException('The operation was aborted', 'AbortError')
-    );
+    const fetch = vi
+      .fn()
+      .mockRejectedValue(new DOMException('The operation was aborted', 'AbortError'));
     adapter = new OpenAICompatibleAdapter({
       provider: 'openrouter',
       baseUrl: 'https://openrouter.ai/api',
       fetch,
       timeout_ms: 100,
+      credentialResolver: mockCredentialResolver,
     });
 
     const result = await adapter.execute(makeRequest());
@@ -148,6 +166,7 @@ describe('OpenAICompatibleAdapter', () => {
       provider: 'openrouter',
       baseUrl: 'https://openrouter.ai/api',
       fetch,
+      credentialResolver: mockCredentialResolver,
     });
 
     const result = await adapter.execute(makeRequest());
@@ -170,6 +189,7 @@ describe('OpenAICompatibleAdapter', () => {
       provider: 'openrouter',
       baseUrl: 'https://openrouter.ai/api',
       fetch,
+      credentialResolver: mockCredentialResolver,
     });
 
     const result = await adapter.execute(makeRequest({ source_id: 'gpt-4o' }));
@@ -191,10 +211,11 @@ describe('OpenAICompatibleAdapter', () => {
       provider: 'openrouter',
       baseUrl: 'https://openrouter.ai/api',
       fetch,
+      credentialResolver: mockCredentialResolver,
     });
 
     const result = await adapter.execute(makeRequest({ source_id: 'unknown-model' }));
-    expect(result.actual_cost).toBe(0);
+    expect(result.actual_cost).toBeNull();
   });
 
   it('translates messages correctly', async () => {
@@ -204,7 +225,11 @@ describe('OpenAICompatibleAdapter', () => {
       return {
         ok: true,
         status: 200,
-        json: () => Promise.resolve({ choices: [{ message: { content: 'ok' } }], usage: { prompt_tokens: 0, completion_tokens: 0 } }),
+        json: () =>
+          Promise.resolve({
+            choices: [{ message: { content: 'ok' } }],
+            usage: { prompt_tokens: 0, completion_tokens: 0 },
+          }),
         headers: new Map(),
       };
     });
@@ -212,13 +237,19 @@ describe('OpenAICompatibleAdapter', () => {
       provider: 'openrouter',
       baseUrl: 'https://openrouter.ai/api',
       fetch,
+      credentialResolver: mockCredentialResolver,
     });
 
-    await adapter.execute(makeRequest({
-      task_input: { system_prompt: 'You are helpful', message: 'Hello' },
-    }));
+    await adapter.execute(
+      makeRequest({
+        task_input: { system_prompt: 'You are helpful', message: 'Hello' },
+      })
+    );
 
-    const body = capturedBody as { model: string; messages: Array<{ role: string; content: string }> };
+    const body = capturedBody as {
+      model: string;
+      messages: Array<{ role: string; content: string }>;
+    };
     expect(body.model).toBe('gpt-4o');
     expect(body.messages).toEqual([
       { role: 'system', content: 'You are helpful' },
@@ -240,7 +271,7 @@ describe('GeminiAdapter', () => {
   let adapter: GeminiAdapter;
 
   beforeEach(() => {
-    adapter = new GeminiAdapter();
+    adapter = new GeminiAdapter({ credentialResolver: mockCredentialResolver });
   });
 
   it('translates to Gemini format and normalizes response', async () => {
@@ -250,23 +281,26 @@ describe('GeminiAdapter', () => {
       return {
         ok: true,
         status: 200,
-        json: () => Promise.resolve({
-          candidates: [{ content: { parts: [{ text: 'Gemini says hello' }] } }],
-          usageMetadata: { promptTokenCount: 15, candidatesTokenCount: 8 },
-        }),
+        json: () =>
+          Promise.resolve({
+            candidates: [{ content: { parts: [{ text: 'Gemini says hello' }] } }],
+            usageMetadata: { promptTokenCount: 15, candidatesTokenCount: 8 },
+          }),
         headers: new Map(),
       };
     });
-    adapter = new GeminiAdapter({ fetch });
+    adapter = new GeminiAdapter({ fetch, credentialResolver: mockCredentialResolver });
 
-    const result = await adapter.execute(makeRequest({
-      provider: 'google',
-      source_id: 'gemini-pro',
-      task_input: { system_prompt: 'Be helpful', message: 'Hi' },
-    }));
+    const result = await adapter.execute(
+      makeRequest({
+        provider: 'google',
+        source_id: 'gemini-pro',
+        task_input: { system_prompt: 'Be helpful', message: 'Hi' },
+      })
+    );
 
     expect(result.success).toBe(true);
-    expect(result.output).toEqual({ content: 'Gemini says hello', raw: expect.any(Object) } as Record<string, unknown>);
+    expect(result.output).toEqual({ content: 'Gemini says hello' });
     expect(result.tokens_used).toEqual({ input: 15, output: 8 });
 
     const body = capturedBody as { contents: unknown[]; system_instruction?: unknown };
@@ -275,12 +309,14 @@ describe('GeminiAdapter', () => {
   });
 
   it('fails without credential', async () => {
-    const result = await adapter.execute(makeRequest({
-      provider: 'google',
-      _credential: undefined,
-    }));
+    const failingAdapter = new GeminiAdapter({ credentialResolver: failingCredentialResolver() });
+    const result = await failingAdapter.execute(
+      makeRequest({
+        provider: 'google',
+      })
+    );
     expect(result.success).toBe(false);
-    expect(result.error_classification).toBe('authentication_failed');
+    expect(result.error_classification).toBe('credential_missing');
     expect(result.is_retryable).toBe(false);
   });
 
@@ -291,7 +327,7 @@ describe('GeminiAdapter', () => {
       json: () => Promise.resolve({ error: { code: 429, message: 'Quota exceeded' } }),
       headers: new Map(),
     });
-    adapter = new GeminiAdapter({ fetch });
+    adapter = new GeminiAdapter({ fetch, credentialResolver: mockCredentialResolver });
 
     const result = await adapter.execute(makeRequest({ provider: 'google' }));
     expect(result.success).toBe(false);
@@ -300,10 +336,10 @@ describe('GeminiAdapter', () => {
   });
 
   it('handles Gemini timeout', async () => {
-    const fetch = vi.fn().mockRejectedValue(
-      new DOMException('The operation was aborted', 'AbortError')
-    );
-    adapter = new GeminiAdapter({ fetch });
+    const fetch = vi
+      .fn()
+      .mockRejectedValue(new DOMException('The operation was aborted', 'AbortError'));
+    adapter = new GeminiAdapter({ fetch, credentialResolver: mockCredentialResolver });
 
     const result = await adapter.execute(makeRequest({ provider: 'google' }));
     expect(result.success).toBe(false);

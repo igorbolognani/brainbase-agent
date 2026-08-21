@@ -1,5 +1,5 @@
 {
-  "name": "@gptrouter/security",
+  "name": "@gptrouter/provider-runtime",
   "version": "0.1.0",
   "type": "module",
   "main": "./dist/index.js",
@@ -8,10 +8,6 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
-    },
-    "./auth-verifier.js": {
-      "types": "./dist/auth-verifier.d.ts",
-      "import": "./dist/auth-verifier.js"
     }
   },
   "scripts": {
@@ -22,10 +18,11 @@
   },
   "dependencies": {
     "@gptrouter/contracts": "0.1.0",
-    "jose": "^6.2.9"
+    "@gptrouter/domain": "0.1.0",
+    "@gptrouter/persistence": "0.1.0",
+    "@gptrouter/security": "0.1.0"
   },
   "devDependencies": {
-    "@types/node": "^20.17.10",
     "typescript": "^5.7.2",
     "vitest": "^4.1.11"
   }

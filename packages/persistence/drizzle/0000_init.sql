@@ -157,7 +157,7 @@ CREATE TABLE IF NOT EXISTS "usage_records" (
   "account_id" TEXT NOT NULL REFERENCES "accounts"("account_id"),
   "attempt_id" TEXT NOT NULL UNIQUE REFERENCES "execution_attempts"("attempt_id"),
   "provider_usage_data" TEXT NOT NULL,
-  "actual_cost" REAL NOT NULL,
+  "actual_cost" REAL,
   "cost_breakdown" TEXT NOT NULL,
   "input_tokens" INTEGER,
   "output_tokens" INTEGER,

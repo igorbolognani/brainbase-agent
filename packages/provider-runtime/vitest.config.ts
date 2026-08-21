@@ -8,6 +8,8 @@ export default defineConfig({
   resolve: {
     alias: {
       '@gptrouter/contracts': path.resolve(__dirname, '../contracts/src/index.ts'),
+      '@gptrouter/domain': path.resolve(__dirname, '../domain/src/index.ts'),
+      '@gptrouter/persistence': path.resolve(__dirname, '../persistence/src/index.ts'),
       '@gptrouter/security': path.resolve(__dirname, '../security/src/index.ts'),
     },
   },

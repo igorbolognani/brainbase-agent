@@ -1,0 +1,24 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "composite": true,
+    "declaration": true,
+    "declarationMap": true,
+    "baseUrl": ".",
+    "paths": {
+      "@gptrouter/contracts": ["../contracts/src/index.ts"],
+      "@gptrouter/domain": ["../domain/src/index.ts"],
+      "@gptrouter/persistence": ["../persistence/src/index.ts"],
+      "@gptrouter/security": ["../security/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*"],
+  "references": [
+    { "path": "../contracts" },
+    { "path": "../domain" },
+    { "path": "../persistence" },
+    { "path": "../security" }
+  ]
+}

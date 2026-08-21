@@ -1,15 +1,14 @@
 // GPTRouter Production Persistence Schema
-// SQLite for development/testing; swap provider+url for PostgreSQL in production.
+// PostgreSQL provider with JSONB for complex fields.
 // Run: npx prisma generate && npx prisma migrate dev
 
 generator client {
   provider        = "prisma-client-js"
-  previewFeatures = ["fullTextSearch"]
+  previewFeatures = ["fullTextSearchPostgres"]
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider = "postgresql"
 }
 
 // ============================================================================
@@ -37,25 +36,27 @@ model Account {
   created_at DateTime @default(now())
   updated_at DateTime @default(now())
 
-  memberships AccountMembership[]
-  connections Connection[]
-  policies    RoutingPolicy[]
-  tasks       Task[]
-  executions  ExecutionAttempt[]
-  usage       UsageRecord[]
-  audit       AuditEvent[]
+  memberships          AccountMembership[]
+  provider_connections ProviderConnection[]
+  gateway_connections  GatewayConnection[]
+  policies             RoutingPolicy[]
+  tasks                Task[]
+  executions           Execution[]
+  usage                UsageRecord[]
+  audit                AuditEvent[]
+  executionAttempts    ExecutionAttempt[]
 }
 
 model AccountMembership {
   membership_id String   @id
   account_id    String
   principal_id  String
-  role          String   // MembershipRole
-  status        String   // MembershipStatus
+  role          String // MembershipRole
+  status        String // MembershipStatus
   created_at    DateTime @default(now())
   updated_at    DateTime @default(now())
 
-  account   Account  @relation(fields: [account_id], references: [account_id])
+  account   Account   @relation(fields: [account_id], references: [account_id])
   principal Principal @relation(fields: [principal_id], references: [principal_id])
 
   @@unique([account_id, principal_id])
@@ -67,23 +68,38 @@ model AccountMembership {
 // Connections (NEVER store raw credentials)
 // ============================================================================
 
-model Connection {
-  connection_id       String   @id
-  account_id          String
-  type                String   // 'provider' | 'gateway'
-  provider            String?  // for type='provider'
-  gateway_url         String?  // for type='gateway'
-  gateway_type        String?  // for type='gateway'
-  status              String   // ConnectionStatus
-  credential_reference String  // Opaque reference, NEVER the actual credential
-  created_at          DateTime @default(now())
-  updated_at          DateTime @default(now())
+model ProviderConnection {
+  connection_id        String   @id
+  account_id           String
+  provider             String
+  status               String // ConnectionStatus
+  credential_reference String // Opaque reference, NEVER the actual credential
+  created_at           DateTime @default(now())
+  updated_at           DateTime @default(now())
 
-  account Account    @relation(fields: [account_id], references: [account_id])
+  account Account      @relation(fields: [account_id], references: [account_id])
   routes  ModelRoute[]
 
   @@index([account_id])
-  @@index([type])
+  @@index([provider])
+  @@index([status])
+}
+
+model GatewayConnection {
+  connection_id        String   @id
+  account_id           String
+  gateway_url          String
+  gateway_type         String
+  status               String // ConnectionStatus
+  credential_reference String // Opaque reference, NEVER the actual credential
+  created_at           DateTime @default(now())
+  updated_at           DateTime @default(now())
+
+  account Account      @relation(fields: [account_id], references: [account_id])
+  routes  ModelRoute[]
+
+  @@index([account_id])
+  @@index([gateway_url])
   @@index([status])
 }
 
@@ -92,28 +108,31 @@ model Connection {
 // ============================================================================
 
 model ModelRoute {
-  route_id            String   @id
-  route_type          String   // 'provider' | 'gateway'
-  connection_id       String
-  source_id           String
-  source_provider     String?
-  source_gateway      String?
-  capabilities        String   // JSON array stored as text
-  pricing_input       Float
-  pricing_output      Float
-  pricing_currency    String   @default("USD")
-  pricing_units       String   @default("per_1k_tokens")
-  pricing_source      String
-  pricing_effective_at DateTime
-  pricing_refreshed_at DateTime
-  pricing_version     String
-  availability_status String   // 'available' | 'unavailable' | 'degraded'
-  created_at          DateTime @default(now())
-  updated_at          DateTime @default(now())
+  route_id               String   @id
+  route_type             String // 'provider' | 'gateway'
+  provider_connection_id String?
+  gateway_connection_id  String?
+  source_id              String
+  source_provider        String?
+  source_gateway         String?
+  capabilities           Json // JSONB
+  pricing_input          Float
+  pricing_output         Float
+  pricing_currency       String   @default("USD")
+  pricing_units          String   @default("per_1k_tokens")
+  pricing_source         String
+  pricing_effective_at   DateTime
+  pricing_refreshed_at   DateTime
+  pricing_version        String
+  availability_status    String // 'available' | 'unavailable' | 'degraded'
+  created_at             DateTime @default(now())
+  updated_at             DateTime @default(now())
 
-  connection Connection @relation(fields: [connection_id], references: [connection_id])
+  provider_connection ProviderConnection? @relation(fields: [provider_connection_id], references: [connection_id])
+  gateway_connection  GatewayConnection?  @relation(fields: [gateway_connection_id], references: [connection_id])
 
-  @@index([connection_id])
+  @@index([provider_connection_id])
+  @@index([gateway_connection_id])
   @@index([source_id])
   @@index([availability_status])
 }
@@ -123,17 +142,17 @@ model ModelRoute {
 // ============================================================================
 
 model RoutingPolicy {
-  policy_id              String   @id
-  account_id             String
-  name                   String
-  ordering_strategy      String
-  admissibility_rules    String   // JSON stored as text
-  budget_constraints     String   // JSON stored as text
-  retry_policy           String?  // JSON stored as text
-  manual_override_allowed Boolean @default(false)
-  version                Int      @default(1)
-  created_at             DateTime @default(now())
-  updated_at             DateTime @default(now())
+  policy_id               String   @id
+  account_id              String
+  name                    String
+  ordering_strategy       String
+  admissibility_rules     Json // JSONB
+  budget_constraints      Json // JSONB
+  retry_policy            Json? // JSONB, nullable
+  manual_override_allowed Boolean  @default(false)
+  version                 Int      @default(1)
+  created_at              DateTime @default(now())
+  updated_at              DateTime @default(now())
 
   account   Account           @relation(fields: [account_id], references: [account_id])
   tasks     Task[]
@@ -150,73 +169,98 @@ model Task {
   task_id      String   @id
   account_id   String
   description  String
-  requirements String   // JSON stored as text
-  status       String   // TaskStatus
+  requirements Json // JSONB
+  status       String // TaskStatus
   created_at   DateTime @default(now())
 
-  account   Account            @relation(fields: [account_id], references: [account_id])
-  decisions RoutingDecision[]
-  attempts  ExecutionAttempt[]
+  account                Account            @relation(fields: [account_id], references: [account_id])
+  decisions              RoutingDecision[]
+  attempts               ExecutionAttempt[]
+  routingPolicy          RoutingPolicy?     @relation(fields: [routingPolicyPolicy_id], references: [policy_id])
+  routingPolicyPolicy_id String?
+  executions             Execution[]
 
   @@index([account_id])
   @@index([status])
 }
 
 model RoutingDecision {
-  decision_id              String    @id
-  task_id                  String
-  policy_id                String
-  policy_version           Int
-  evaluated_routes         String    // JSON array stored as text
-  admissible_routes        String    // JSON array stored as text
-  selected_route_id        String?
-  route_snapshot           String?   // JSON stored as text
-  rejection_reasons        String    // JSON array stored as text
-  estimated_cost           Float?
-  decided_at               DateTime  @default(now())
-  parent_decision_id       String?
-  fallback_reason          String?
+  decision_id                   String   @id
+  task_id                       String
+  policy_id                     String
+  policy_version                Int
+  evaluated_routes              Json // JSONB
+  admissible_routes             Json // JSONB
+  selected_route_id             String?
+  route_snapshot                Json? // JSONB, nullable
+  rejection_reasons             Json // JSONB
+  estimated_cost                Float?
+  decided_at                    DateTime @default(now())
+  parent_decision_id            String?
+  fallback_reason               String?
   ordering_strategy_unsupported Boolean?
 
-  task   Task      @relation(fields: [task_id], references: [task_id])
-  policy RoutingPolicy @relation(fields: [policy_id], references: [policy_id])
-  attempts ExecutionAttempt[]
+  task       Task               @relation(fields: [task_id], references: [task_id])
+  policy     RoutingPolicy      @relation(fields: [policy_id], references: [policy_id])
+  attempts   ExecutionAttempt[]
+  executions Execution[]
 
   @@index([task_id])
   @@index([policy_id])
   @@index([decided_at])
 }
 
+model Execution {
+  execution_id     String   @id
+  account_id       String
+  task_id          String
+  root_decision_id String
+  idempotency_key  String
+  status           String // ExecutionStatus
+  created_at       DateTime @default(now())
+
+  account  Account            @relation(fields: [account_id], references: [account_id])
+  task     Task               @relation(fields: [task_id], references: [task_id])
+  decision RoutingDecision    @relation(fields: [root_decision_id], references: [decision_id])
+  attempts ExecutionAttempt[]
+
+  @@unique([account_id, idempotency_key])
+  @@index([account_id])
+  @@index([task_id])
+  @@index([root_decision_id])
+  @@index([status])
+}
+
 model ExecutionAttempt {
-  attempt_id          String    @id
-  account_id          String
-  execution_id        String
-  task_id             String
-  decision_id         String
-  idempotency_key     String
-  status              String    // ExecutionStatus
-  started_at          DateTime?
-  completed_at        DateTime?
-  cancel_requested_at DateTime?
-  cancelled_at        DateTime?
-  retry_count         Int       @default(0)
-  retry_policy        String?   // JSON stored as text
-  parent_attempt_id   String?
+  attempt_id           String    @id
+  execution_id         String
+  account_id           String
+  task_id              String
+  decision_id          String
+  idempotency_key      String
+  status               String // ExecutionStatus
+  started_at           DateTime?
+  completed_at         DateTime?
+  cancel_requested_at  DateTime?
+  cancelled_at         DateTime?
+  retry_count          Int       @default(0)
+  retry_policy         Json? // JSONB, nullable
+  parent_attempt_id    String?
   verification_outcome String?
-  failure_code        String?
-  created_at          DateTime  @default(now())
+  failure_code         String?
+  created_at           DateTime  @default(now())
 
-  account Account          @relation(fields: [account_id], references: [account_id])
-  task    Task             @relation(fields: [task_id], references: [task_id])
-  decision RoutingDecision @relation(fields: [decision_id], references: [decision_id])
-  usage   UsageRecord?
+  execution Execution       @relation(fields: [execution_id], references: [execution_id])
+  account   Account         @relation(fields: [account_id], references: [account_id])
+  task      Task            @relation(fields: [task_id], references: [task_id])
+  decision  RoutingDecision @relation(fields: [decision_id], references: [decision_id])
+  usage     UsageRecord?
 
-  @@unique([account_id, idempotency_key]) // Root idempotency guarantee
   @@index([execution_id])
+  @@index([account_id])
   @@index([task_id])
   @@index([decision_id])
   @@index([status])
-  @@index([account_id, idempotency_key])
 }
 
 // ============================================================================
@@ -224,16 +268,16 @@ model ExecutionAttempt {
 // ============================================================================
 
 model UsageRecord {
-  usage_id           String   @id
-  account_id         String
-  attempt_id         String   @unique
-  provider_usage_data String  // JSON stored as text
-  actual_cost        Float
-  cost_breakdown     String   // JSON stored as text
-  input_tokens       Int?
-  output_tokens      Int?
-  reconciled_at      DateTime @default(now())
-  cost_variance      Float?
+  usage_id            String   @id
+  account_id          String
+  attempt_id          String   @unique
+  provider_usage_data Json // JSONB
+  actual_cost         Float? // Nullable: null = unknown cost
+  cost_breakdown      Json // JSONB
+  input_tokens        Int?
+  output_tokens       Int?
+  reconciled_at       DateTime @default(now())
+  cost_variance       Float?
 
   account Account          @relation(fields: [account_id], references: [account_id])
   attempt ExecutionAttempt @relation(fields: [attempt_id], references: [attempt_id])
@@ -253,7 +297,7 @@ model AuditEvent {
   actor         String
   resource_type String?
   resource_id   String?
-  metadata      String   // JSON stored as text, NEVER contains credentials
+  metadata      Json // JSONB, NEVER contains credentials
   timestamp     DateTime @default(now())
 
   account Account? @relation(fields: [account_id], references: [account_id])
@@ -269,17 +313,17 @@ model AuditEvent {
 // ============================================================================
 
 model CredentialReference {
-  credential_ref_id String   @id
+  credential_ref_id String    @id
   account_id        String
   provider          String
-  reference_key     String   // Opaque reference to secret store
-  auth_method       String   // 'oauth' | 'secure_secret_setup' | 'none'
-  status            String   // 'active' | 'rotating' | 'expired' | 'revoked'
+  reference_key     String // Opaque reference to secret store
+  auth_method       String // 'oauth' | 'secure_secret_setup' | 'none'
+  status            String // 'active' | 'rotating' | 'expired' | 'revoked'
   rotation_at       DateTime?
-  created_at        DateTime @default(now())
-  updated_at        DateTime @default(now())
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @default(now())
 
+  @@unique([account_id, provider])
   @@index([account_id])
   @@index([provider])
-  @@unique([account_id, provider])
 }

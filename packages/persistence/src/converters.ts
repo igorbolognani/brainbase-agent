@@ -357,7 +357,7 @@ export function rowToUsage(row: {
   account_id: string;
   attempt_id: string;
   provider_usage_data: string;
-  actual_cost: number;
+  actual_cost: number | null;
   cost_breakdown: string;
   input_tokens: number | null;
   output_tokens: number | null;

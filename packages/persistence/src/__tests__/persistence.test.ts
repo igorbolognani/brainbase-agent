@@ -1,9 +1,10 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, beforeAll } from 'vitest';
 import { createTestDatabase, initializeSchema, type DrizzleDB } from '../database.js';
 import { createDatabaseRepositories, type DatabaseRepositories } from '../repositories.js';
 import { FakeSecretStore, EnvSecretStore } from '../credential-store.js';
 import { AuthVerifier, AuthError, FakeAuthVerifier } from '../auth-verifier.js';
 import type { ProviderConnection, GatewayConnection } from '@gptrouter/contracts';
+import { SignJWT, generateKeyPair, exportJWK, type JWK, type JWTPayload } from 'jose';
 
 let db: DrizzleDB;
 let sqlite: { exec(sql: string): void };
@@ -809,22 +810,37 @@ describe('EnvSecretStore', () => {
 // Auth Verifier
 // ============================================================================
 
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call */
 describe('AuthVerifier', () => {
-  const validHeader = Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT' })).toString(
-    'base64url'
-  );
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let privateKey: any;
+  let publicKeyJwk: JWK;
 
-  function makeToken(payload: Record<string, unknown>): string {
-    return `${validHeader}.${Buffer.from(JSON.stringify(payload)).toString('base64url')}.sig`;
+  beforeAll(async () => {
+    const { publicKey, privateKey: priv } = await generateKeyPair('RS256');
+    privateKey = priv;
+    publicKeyJwk = await exportJWK(publicKey);
+  });
+
+  async function makeToken(claims: Record<string, unknown>): Promise<string> {
+    const jwt = new SignJWT(claims as JWTPayload)
+      .setProtectedHeader({ alg: 'RS256', typ: 'JWT' })
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
+      .sign(privateKey);
+    return jwt;
+  }
+
+  function resolveJwks(): () => Promise<JWK[]> {
+    return async () => [publicKeyJwk];
   }
 
   it('rejects empty tokens', async () => {
-    const verifier = new AuthVerifier();
+    const verifier = new AuthVerifier({ resolveJwks: resolveJwks() });
     await expect(verifier.verify('')).rejects.toThrow(AuthError);
   });
 
   it('rejects malformed tokens', async () => {
-    const verifier = new AuthVerifier();
+    const verifier = new AuthVerifier({ resolveJwks: resolveJwks() });
     try {
       await verifier.verify('not-a-jwt');
       expect.unreachable();
@@ -836,9 +852,8 @@ describe('AuthVerifier', () => {
 
   it('rejects expired tokens', async () => {
     const clock = () => new Date('2025-01-02T00:00:00Z');
-    const verifier = new AuthVerifier({ clock });
-    const token = makeToken({
-      alg: 'RS256',
+    const verifier = new AuthVerifier({ clock, resolveJwks: resolveJwks() });
+    const token = await makeToken({
       iss: 'test',
       sub: 'user1',
       exp: 1735689600,
@@ -855,9 +870,12 @@ describe('AuthVerifier', () => {
 
   it('rejects wrong issuer', async () => {
     const clock = () => new Date('2025-01-01T00:00:00Z');
-    const verifier = new AuthVerifier({ clock, expectedIssuer: 'expected-issuer' });
-    const token = makeToken({
-      alg: 'RS256',
+    const verifier = new AuthVerifier({
+      clock,
+      expectedIssuer: 'expected-issuer',
+      resolveJwks: resolveJwks(),
+    });
+    const token = await makeToken({
       iss: 'wrong-issuer',
       sub: 'user1',
       exp: 9999999999,
@@ -874,9 +892,12 @@ describe('AuthVerifier', () => {
 
   it('rejects wrong audience', async () => {
     const clock = () => new Date('2025-01-01T00:00:00Z');
-    const verifier = new AuthVerifier({ clock, expectedAudience: 'expected-aud' });
-    const token = makeToken({
-      alg: 'RS256',
+    const verifier = new AuthVerifier({
+      clock,
+      expectedAudience: 'expected-aud',
+      resolveJwks: resolveJwks(),
+    });
+    const token = await makeToken({
       iss: 'test',
       sub: 'user1',
       aud: 'wrong-aud',
@@ -898,9 +919,9 @@ describe('AuthVerifier', () => {
       clock,
       expectedIssuer: 'test-issuer',
       expectedAudience: 'test-aud',
+      resolveJwks: resolveJwks(),
     });
-    const token = makeToken({
-      alg: 'RS256',
+    const token = await makeToken({
       iss: 'test-issuer',
       sub: 'user1',
       aud: 'test-aud',
@@ -931,6 +952,7 @@ describe('FakeAuthVerifier', () => {
     await expect(verifier.verify('unknown-token')).rejects.toThrow('Unknown test token');
   });
 });
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call */
 
 // ============================================================================
 // Decision immutability

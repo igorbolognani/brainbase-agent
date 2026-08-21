@@ -10,3 +10,4 @@ export * from './safe-output.js';
 export * from './gateway-validator.js';
 export * from './ip-safety.js';
 export * from './safe-gateway-dispatcher.js';
+export * from './auth-verifier.js';

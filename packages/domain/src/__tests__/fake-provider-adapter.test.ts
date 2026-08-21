@@ -94,7 +94,10 @@ describe('Fake Provider Adapter Boundary', () => {
     });
     registry.registerAdapter('test_provider', adapter);
 
-    const bridge = new AdapterExecutionCoordinatorBridge({ registry });
+    const bridge = new AdapterExecutionCoordinatorBridge({
+      registry,
+      credentialResolver: { resolveCredential: async () => 'test-cred' },
+    });
     const verifier = new AdapterExecutionVerifier();
 
     const mockTask: Task = {
@@ -175,7 +178,10 @@ describe('Fake Provider Adapter Boundary', () => {
 
   it('fails closed for unknown adapter with terminal failure', async () => {
     const registry = new DefaultProviderAdapterRegistry();
-    const bridge = new AdapterExecutionCoordinatorBridge({ registry });
+    const bridge = new AdapterExecutionCoordinatorBridge({
+      registry,
+      credentialResolver: { resolveCredential: async () => 'test-cred' },
+    });
     const verifier = new AdapterExecutionVerifier();
 
     const mockTask = {

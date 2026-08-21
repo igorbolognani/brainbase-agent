@@ -18,7 +18,7 @@ export type TaskStatus =
 export type ExecutionStatus =
   'pending' | 'running' | 'completed' | 'failed' | 'cancel_requested' | 'cancelled';
 export type VerificationOutcome = 'accepted' | 'retryable_failure' | 'terminal_failure';
-export type OrderingStrategy = 'cost' | 'quality' | 'latency' | 'custom';
+export type OrderingStrategy = 'cost' | 'quality' | 'latency' | 'balanced' | 'custom';
 export type OrderingStatus = 'operational' | 'unsupported';
 
 /**
@@ -51,6 +51,7 @@ export type RejectionReasonCode =
   | 'budget_exceeded_daily'
   | 'budget_exceeded_monthly'
   | 'budget_exceeded_route_class'
+  | 'budget_exceeded_insufficient_balance'
   | 'manual_override_invalid';
 
 // ============================================================================
@@ -320,6 +321,16 @@ export interface RetryPolicy {
   max_total_estimated_cost?: number | null;
 }
 
+export interface Execution {
+  execution_id: string;
+  account_id: string;
+  task_id: string;
+  root_decision_id: string;
+  idempotency_key: string;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+  created_at: Date;
+}
+
 export interface ExecutionAttempt {
   attempt_id: string;
   account_id: string;
@@ -346,7 +357,7 @@ export interface UsageRecord {
   account_id: string;
   attempt_id: string;
   provider_usage_data: Record<string, unknown>;
-  actual_cost: number;
+  actual_cost: number | null;
   cost_breakdown: Record<string, unknown>;
   tokens_used: {
     input: number;

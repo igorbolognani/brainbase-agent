@@ -22,6 +22,7 @@
     "paths": {
       "@gptrouter/contracts": ["./packages/contracts/src/index.ts"],
       "@gptrouter/domain": ["./packages/domain/src/index.ts"],
+      "@gptrouter/persistence": ["./packages/persistence/src/index.ts"],
       "@gptrouter/security": ["./packages/security/src/index.ts"]
     }
   },
