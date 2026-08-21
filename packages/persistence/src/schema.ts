@@ -288,3 +288,128 @@ export const credential_references = sqliteTable(
     uniqueIndex('credrefs_account_provider').on(t.account_id, t.provider),
   ]
 );
+
+// ============================================================================
+// Phase 4: Model Offering Catalog
+// ============================================================================
+
+export const model_offerings = sqliteTable(
+  'model_offerings',
+  {
+    offering_id: text('offering_id').primaryKey(),
+    provider: text('provider').notNull(),
+    model_id: text('model_id').notNull(),
+    display_name: text('display_name').notNull(),
+    capabilities: text('capabilities').notNull(),
+    context_window: integer('context_window'),
+    max_output_tokens: integer('max_output_tokens'),
+    supports_tools: integer('supports_tools', { mode: 'boolean' }).notNull().default(false),
+    supports_vision: integer('supports_vision', { mode: 'boolean' }).notNull().default(false),
+    supports_audio: integer('supports_audio', { mode: 'boolean' }).notNull().default(false),
+    supports_structured_output: integer('supports_structured_output', { mode: 'boolean' })
+      .notNull()
+      .default(false),
+    supports_reasoning: integer('supports_reasoning', { mode: 'boolean' }).notNull().default(false),
+    pricing_input: real('pricing_input').notNull(),
+    pricing_output: real('pricing_output').notNull(),
+    pricing_currency: text('pricing_currency').notNull().default('USD'),
+    pricing_units: text('pricing_units').notNull().default('per_1k_tokens'),
+    pricing_source: text('pricing_source').notNull(),
+    pricing_effective_at: text('pricing_effective_at').notNull(),
+    pricing_refreshed_at: text('pricing_refreshed_at').notNull(),
+    pricing_version: text('pricing_version').notNull(),
+    availability_status: text('availability_status').notNull().default('available'),
+    health_state: text('health_state').notNull().default('healthy'),
+    effective_at: text('effective_at').notNull(),
+    refreshed_at: text('refreshed_at').notNull(),
+    version: text('version').notNull(),
+  },
+  (t) => [
+    uniqueIndex('offerings_provider_model').on(t.provider, t.model_id),
+    index('offerings_provider').on(t.provider),
+    index('offerings_availability').on(t.availability_status),
+    index('offerings_health').on(t.health_state),
+  ]
+);
+
+export const model_quality_evidence = sqliteTable(
+  'model_quality_evidence',
+  {
+    evidence_id: text('evidence_id').primaryKey(),
+    offering_id: text('offering_id')
+      .notNull()
+      .references(() => model_offerings.offering_id),
+    evidence_type: text('evidence_type').notNull(),
+    benchmark: text('benchmark').notNull(),
+    domain: text('domain').notNull(),
+    task_family: text('task_family').notNull(),
+    score: real('score').notNull(),
+    score_scale: text('score_scale').notNull(),
+    higher_is_better: integer('higher_is_better', { mode: 'boolean' }).notNull().default(true),
+    sample_size: integer('sample_size').notNull(),
+    source: text('source').notNull(),
+    source_reference: text('source_reference').notNull(),
+    measured_at: text('measured_at').notNull(),
+    ingested_at: text('ingested_at').notNull(),
+    version: text('version').notNull(),
+    confidence: real('confidence').notNull(),
+  },
+  (t) => [
+    index('evidence_offering').on(t.offering_id),
+    index('evidence_benchmark').on(t.benchmark),
+    index('evidence_domain').on(t.domain),
+    index('evidence_task_family').on(t.task_family),
+  ]
+);
+
+// ============================================================================
+// Phase 5: Orchestration Graph
+// ============================================================================
+
+export const orchestration_graphs = sqliteTable(
+  'orchestration_graphs',
+  {
+    graph_id: text('graph_id').primaryKey(),
+    execution_id: text('execution_id').notNull().unique(),
+    account_id: text('account_id')
+      .notNull()
+      .references(() => accounts.account_id),
+    task_id: text('task_id')
+      .notNull()
+      .references(() => tasks.task_id),
+    mode: text('mode').notNull(),
+    status: text('status').notNull().default('pending'),
+    max_nodes: integer('max_nodes').notNull().default(10),
+    max_parallel: integer('max_parallel').notNull().default(4),
+    created_at: text('created_at').notNull(),
+    updated_at: text('updated_at').notNull(),
+  },
+  (t) => [
+    index('graphs_account').on(t.account_id),
+    index('graphs_execution').on(t.execution_id),
+    index('graphs_task').on(t.task_id),
+  ]
+);
+
+export const orchestration_nodes = sqliteTable(
+  'orchestration_nodes',
+  {
+    node_id: text('node_id').primaryKey(),
+    graph_id: text('graph_id')
+      .notNull()
+      .references(() => orchestration_graphs.graph_id),
+    parent_node_id: text('parent_node_id'),
+    role: text('role').notNull(),
+    execution_id: text('execution_id'),
+    decision_id: text('decision_id'),
+    status: text('status').notNull().default('pending'),
+    sort_order: integer('sort_order').notNull().default(0),
+    created_at: text('created_at').notNull(),
+    updated_at: text('updated_at').notNull(),
+  },
+  (t) => [
+    index('nodes_graph').on(t.graph_id),
+    index('nodes_execution').on(t.execution_id),
+    index('nodes_status').on(t.status),
+  ]
+);

@@ -400,3 +400,113 @@ export interface BudgetCheckResult {
   remaining_daily?: number;
   remaining_monthly?: number;
 }
+
+// ============================================================================
+// Phase 4: Model Offering Catalog
+// ============================================================================
+
+export type HealthState = 'healthy' | 'degraded' | 'unavailable' | 'disabled';
+
+export interface ModelOffering {
+  offering_id: string;
+  provider: string;
+  model_id: string;
+  display_name: string;
+  capabilities: string[];
+  context_window: number | null;
+  max_output_tokens: number | null;
+  supports_tools: boolean;
+  supports_vision: boolean;
+  supports_audio: boolean;
+  supports_structured_output: boolean;
+  supports_reasoning: boolean;
+  pricing: PricingInfo;
+  availability_status: AvailabilityStatus;
+  health_state: HealthState;
+  effective_at: Date;
+  refreshed_at: Date;
+  version: string;
+}
+
+// ============================================================================
+// Phase 4: Quality Evidence
+// ============================================================================
+
+export interface ModelQualityEvidence {
+  evidence_id: string;
+  offering_id: string;
+  evidence_type: 'benchmark' | 'evaluation' | 'human_annotation' | 'synthetic';
+  benchmark: string;
+  domain: string;
+  task_family: string;
+  score: number;
+  score_scale: string;
+  higher_is_better: boolean;
+  sample_size: number;
+  source: string;
+  source_reference: string;
+  measured_at: Date;
+  ingested_at: Date;
+  version: string;
+  confidence: number;
+}
+
+// ============================================================================
+// Phase 4: Routing Scoring
+// ============================================================================
+
+export interface RoutingScore {
+  route_id: string;
+  total_score: number;
+  cost_score: number;
+  quality_score: number;
+  health_penalty: number;
+  reasons: string[];
+}
+
+export interface RoutingExplanation {
+  selected_route_id: string | null;
+  strategy: OrderingStrategy;
+  scores: RoutingScore[];
+  admissibility_rejections: RejectionReason[];
+  estimated_cost: number | null;
+  health_states: Record<string, HealthState>;
+  unknown_evidence: string[];
+}
+
+// ============================================================================
+// Phase 5: Orchestration Graph
+// ============================================================================
+
+export type OrchestrationMode =
+  'single' | 'fallback' | 'parallel_candidates' | 'planner_worker_reviewer';
+export type OrchestrationNodeRole =
+  'root' | 'worker' | 'planner' | 'reviewer' | 'judge' | 'candidate';
+export type OrchestrationNodeStatus =
+  'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'skipped';
+
+export interface OrchestrationGraph {
+  graph_id: string;
+  execution_id: string;
+  account_id: string;
+  task_id: string;
+  mode: OrchestrationMode;
+  status: OrchestrationNodeStatus;
+  max_nodes: number;
+  max_parallel: number;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface OrchestrationNode {
+  node_id: string;
+  graph_id: string;
+  parent_node_id: string | null;
+  role: OrchestrationNodeRole;
+  execution_id: string | null;
+  decision_id: string | null;
+  status: OrchestrationNodeStatus;
+  sort_order: number;
+  created_at: Date;
+  updated_at: Date;
+}

@@ -6,18 +6,22 @@
 import type {
   Account,
   AccountMembership,
-  Principal,
+  AuditEvent,
+  AvailabilityStatus,
   Connection,
+  Execution,
+  ExecutionAttempt,
+  ModelMetadata,
+  ModelOffering,
+  ModelQualityEvidence,
   ModelRoute,
+  OrchestrationGraph,
+  OrchestrationNode,
+  Principal,
+  RoutingDecision,
   RoutingPolicy,
   Task,
-  Execution,
-  RoutingDecision,
-  ExecutionAttempt,
   UsageRecord,
-  AuditEvent,
-  ModelMetadata,
-  AvailabilityStatus,
 } from './types.js';
 
 // ============================================================================
@@ -147,4 +151,49 @@ export interface AuditRepository {
       offset?: number;
     }
   ): Promise<{ events: AuditEvent[]; total_count: number }>;
+}
+
+// ============================================================================
+// Phase 4: Model Offering Catalog
+// ============================================================================
+
+export interface ModelOfferingRepository {
+  getOffering(offering_id: string): Promise<ModelOffering | null>;
+  listOfferings(filters?: {
+    provider?: string;
+    capability?: string;
+    availability?: AvailabilityStatus;
+  }): Promise<ModelOffering[]>;
+  upsertOffering(
+    offering: Omit<ModelOffering, 'effective_at' | 'refreshed_at'>
+  ): Promise<ModelOffering>;
+  updateHealth(offering_id: string, health_state: ModelOffering['health_state']): Promise<void>;
+}
+
+export interface ModelEvidenceRepository {
+  getEvidence(evidence_id: string): Promise<ModelQualityEvidence | null>;
+  listEvidenceForOffering(offering_id: string): Promise<ModelQualityEvidence[]>;
+  listEvidenceForModel(provider: string, model_id: string): Promise<ModelQualityEvidence[]>;
+  upsertEvidence(
+    evidence: Omit<ModelQualityEvidence, 'ingested_at'>
+  ): Promise<ModelQualityEvidence>;
+}
+
+// ============================================================================
+// Phase 5: Orchestration Graph
+// ============================================================================
+
+export interface OrchestrationGraphRepository {
+  getGraph(graph_id: string): Promise<OrchestrationGraph | null>;
+  getGraphByExecution(execution_id: string): Promise<OrchestrationGraph | null>;
+  createGraph(
+    graph: Omit<OrchestrationGraph, 'created_at' | 'updated_at'>
+  ): Promise<OrchestrationGraph>;
+  updateGraphStatus(graph_id: string, status: OrchestrationGraph['status']): Promise<void>;
+  listNodes(graph_id: string): Promise<OrchestrationNode[]>;
+  createNode(
+    node: Omit<OrchestrationNode, 'created_at' | 'updated_at'>
+  ): Promise<OrchestrationNode>;
+  updateNodeStatus(node_id: string, status: OrchestrationNode['status']): Promise<void>;
+  countNodes(graph_id: string): Promise<number>;
 }

@@ -45,6 +45,7 @@ model Account {
   usage                UsageRecord[]
   audit                AuditEvent[]
   executionAttempts    ExecutionAttempt[]
+  orchestration_graphs OrchestrationGraph[]
 }
 
 model AccountMembership {
@@ -327,4 +328,112 @@ model CredentialReference {
   @@unique([account_id, provider])
   @@index([account_id])
   @@index([provider])
+}
+
+// ============================================================================
+// Phase 4: Model Offering Catalog
+// ============================================================================
+
+model ModelOffering {
+  offering_id              String   @id
+  provider                 String
+  model_id                 String
+  display_name             String
+  capabilities             Json     // JSONB: string[]
+  context_window           Int?
+  max_output_tokens        Int?
+  supports_tools           Boolean  @default(false)
+  supports_vision          Boolean  @default(false)
+  supports_audio           Boolean  @default(false)
+  supports_structured_output Boolean @default(false)
+  supports_reasoning       Boolean  @default(false)
+  pricing_input            Float
+  pricing_output           Float
+  pricing_currency         String   @default("USD")
+  pricing_units            String   @default("per_1k_tokens")
+  pricing_source           String
+  pricing_effective_at     DateTime
+  pricing_refreshed_at     DateTime
+  pricing_version          String
+  availability_status      String   @default("available")
+  health_state             String   @default("healthy")
+  effective_at             DateTime @default(now())
+  refreshed_at             DateTime @default(now())
+  version                  String
+
+  evidence ModelQualityEvidence[]
+
+  @@unique([provider, model_id])
+  @@index([provider])
+  @@index([availability_status])
+  @@index([health_state])
+}
+
+model ModelQualityEvidence {
+  evidence_id       String   @id
+  offering_id       String
+  evidence_type     String   // 'benchmark' | 'evaluation' | 'human_annotation' | 'synthetic'
+  benchmark         String
+  domain            String
+  task_family       String
+  score             Float
+  score_scale       String
+  higher_is_better  Boolean  @default(true)
+  sample_size       Int
+  source            String
+  source_reference  String
+  measured_at       DateTime
+  ingested_at       DateTime @default(now())
+  version           String
+  confidence        Float
+
+  offering ModelOffering @relation(fields: [offering_id], references: [offering_id])
+
+  @@index([offering_id])
+  @@index([benchmark])
+  @@index([domain])
+  @@index([task_family])
+}
+
+// ============================================================================
+// Phase 5: Orchestration Graph
+// ============================================================================
+
+model OrchestrationGraph {
+  graph_id      String   @id
+  execution_id  String   @unique
+  account_id    String
+  task_id       String
+  mode          String   // 'single' | 'fallback' | 'parallel_candidates' | 'planner_worker_reviewer'
+  status        String   @default("pending")
+  max_nodes     Int      @default(10)
+  max_parallel  Int      @default(4)
+  created_at    DateTime @default(now())
+  updated_at    DateTime @default(now())
+
+  account Account @relation(fields: [account_id], references: [account_id])
+  nodes   OrchestrationNode[]
+
+  @@index([account_id])
+  @@index([execution_id])
+  @@index([task_id])
+}
+
+model OrchestrationNode {
+  node_id          String   @id
+  graph_id         String
+  parent_node_id   String?
+  role             String   // 'root' | 'worker' | 'planner' | 'reviewer' | 'judge' | 'candidate'
+  execution_id     String?
+  decision_id      String?
+  status           String   @default("pending")
+  sort_order       Int      @default(0)
+  created_at       DateTime @default(now())
+  updated_at       DateTime @default(now())
+
+  graph OrchestrationGraph @relation(fields: [graph_id], references: [graph_id])
+
+  @@index([graph_id])
+  @@index([execution_id])
+  @@index([status])
 }

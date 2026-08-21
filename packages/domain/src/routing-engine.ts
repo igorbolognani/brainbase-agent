@@ -2,9 +2,7 @@
  * Core routing algorithm: two-stage admissibility filter + ordering
  *
  * Stage 1: Filter routes by capability, availability, policy, budget
- * Stage 2: Order admissible routes by configured strategy (cost/quality/latency)
- *
- * V0.1: Only cost ordering is operational. Quality/latency require evidence-backed metrics.
+ * Stage 2: Order admissible routes by configured strategy (cost/quality/latency/balanced)
  */
 
 import type {
@@ -18,8 +16,10 @@ import type {
   BudgetCheckResult,
   RoutePerformanceMetadata,
   Connection,
+  HealthState,
 } from '@gptrouter/contracts';
 import { generateId } from './utils.js';
+import { EvidenceBasedRouter, rankByScore } from './routing-scoring.js';
 
 export interface RoutingEngineDependencies {
   checkBudget: (
@@ -29,11 +29,9 @@ export interface RoutingEngineDependencies {
   ) => Promise<BudgetCheckResult>;
   estimateCost: (route: ModelRoute, task: Task) => number;
   getPerformanceMetadata?: (route_id: string) => Promise<RoutePerformanceMetadata | null>;
-  /**
-   * Resolve persisted provider/gateway metadata by opaque connection ID.
-   * Required only for policies whose admissibility depends on connection-owned data.
-   */
   getConnection?: (connection_id: string) => Promise<Connection | null>;
+  getQualityScores?: (route_ids: string[]) => Promise<Map<string, number>>;
+  getHealthStates?: (connection_ids: string[]) => Promise<Map<string, HealthState>>;
 }
 
 export class RoutingEngine {
@@ -302,19 +300,36 @@ export class RoutingEngine {
     policy: RoutingPolicy,
     task: Task
   ): Promise<ModelRoute[]> {
-    const routesCopy = [...routes];
+    if (routes.length === 0) return [];
 
     switch (policy.ordering_strategy) {
-      case 'cost':
+      case 'cost': {
+        const routesCopy = [...routes];
         return routesCopy.sort(
           (a, b) => this.deps.estimateCost(a, task) - this.deps.estimateCost(b, task)
         );
+      }
       case 'quality':
+      case 'balanced': {
+        const qualityScores = this.deps.getQualityScores
+          ? await this.deps.getQualityScores(routes.map((r) => r.route_id))
+          : new Map<string, number>();
+        const healthStates = this.deps.getHealthStates
+          ? await this.deps.getHealthStates([...new Set(routes.map((r) => r.connection_id))])
+          : new Map<string, HealthState>();
+
+        const router = new EvidenceBasedRouter();
+        const scores = router.scoreRoutes(routes, policy, qualityScores, healthStates);
+        if (!scores) return [];
+
+        const ranked = rankByScore(scores);
+        return ranked.map((s) => routes.find((r) => r.route_id === s.route_id)!).filter(Boolean);
+      }
       case 'latency':
       case 'custom':
         return [];
       default:
-        return routesCopy;
+        return [...routes];
     }
   }
 

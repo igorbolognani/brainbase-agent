@@ -13,7 +13,14 @@ import type {
   ExecutionAttempt,
   ExecutionRepository,
   MembershipRepository,
+  ModelEvidenceRepository,
+  ModelOffering,
+  ModelOfferingRepository,
+  ModelQualityEvidence,
   ModelRoute,
+  OrchestrationGraph,
+  OrchestrationGraphRepository,
+  OrchestrationNode,
   Principal,
   PrincipalRepository,
   PolicyRepository,
@@ -374,6 +381,156 @@ function rowToAudit(row: {
     resource_id: row.resource_id,
     metadata: row.metadata as Record<string, unknown>,
     timestamp: row.timestamp,
+  };
+}
+
+function rowToModelOffering(row: {
+  offering_id: string;
+  provider: string;
+  model_id: string;
+  display_name: string;
+  capabilities: unknown;
+  context_window: number | null;
+  max_output_tokens: number | null;
+  supports_tools: boolean;
+  supports_vision: boolean;
+  supports_audio: boolean;
+  supports_structured_output: boolean;
+  supports_reasoning: boolean;
+  pricing_input: number;
+  pricing_output: number;
+  pricing_currency: string;
+  pricing_units: string;
+  pricing_source: string;
+  pricing_effective_at: Date;
+  pricing_refreshed_at: Date;
+  pricing_version: string;
+  availability_status: string;
+  health_state: string;
+  effective_at: Date;
+  refreshed_at: Date;
+  version: string;
+}): ModelOffering {
+  return {
+    offering_id: row.offering_id,
+    provider: row.provider,
+    model_id: row.model_id,
+    display_name: row.display_name,
+    capabilities: Array.isArray(row.capabilities)
+      ? row.capabilities.filter((v): v is string => typeof v === 'string')
+      : [],
+    context_window: row.context_window,
+    max_output_tokens: row.max_output_tokens,
+    supports_tools: row.supports_tools,
+    supports_vision: row.supports_vision,
+    supports_audio: row.supports_audio,
+    supports_structured_output: row.supports_structured_output,
+    supports_reasoning: row.supports_reasoning,
+    pricing: {
+      input_cost_per_1k_tokens: row.pricing_input,
+      output_cost_per_1k_tokens: row.pricing_output,
+      currency: row.pricing_currency,
+      units: row.pricing_units,
+      source: row.pricing_source,
+      effective_at: row.pricing_effective_at,
+      refreshed_at: row.pricing_refreshed_at,
+      version: row.pricing_version,
+    },
+    availability_status: row.availability_status as ModelOffering['availability_status'],
+    health_state: row.health_state as ModelOffering['health_state'],
+    effective_at: row.effective_at,
+    refreshed_at: row.refreshed_at,
+    version: row.version,
+  };
+}
+
+function rowToModelQualityEvidence(row: {
+  evidence_id: string;
+  offering_id: string;
+  evidence_type: string;
+  benchmark: string;
+  domain: string;
+  task_family: string;
+  score: number;
+  score_scale: string;
+  higher_is_better: boolean;
+  sample_size: number;
+  source: string;
+  source_reference: string;
+  measured_at: Date;
+  ingested_at: Date;
+  version: string;
+  confidence: number;
+}): ModelQualityEvidence {
+  return {
+    evidence_id: row.evidence_id,
+    offering_id: row.offering_id,
+    evidence_type: row.evidence_type as ModelQualityEvidence['evidence_type'],
+    benchmark: row.benchmark,
+    domain: row.domain,
+    task_family: row.task_family,
+    score: row.score,
+    score_scale: row.score_scale,
+    higher_is_better: row.higher_is_better,
+    sample_size: row.sample_size,
+    source: row.source,
+    source_reference: row.source_reference,
+    measured_at: row.measured_at,
+    ingested_at: row.ingested_at,
+    version: row.version,
+    confidence: row.confidence,
+  };
+}
+
+function rowToOrchestrationGraph(row: {
+  graph_id: string;
+  execution_id: string;
+  account_id: string;
+  task_id: string;
+  mode: string;
+  status: string;
+  max_nodes: number;
+  max_parallel: number;
+  created_at: Date;
+  updated_at: Date;
+}): OrchestrationGraph {
+  return {
+    graph_id: row.graph_id,
+    execution_id: row.execution_id,
+    account_id: row.account_id,
+    task_id: row.task_id,
+    mode: row.mode as OrchestrationGraph['mode'],
+    status: row.status as OrchestrationGraph['status'],
+    max_nodes: row.max_nodes,
+    max_parallel: row.max_parallel,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
+function rowToOrchestrationNode(row: {
+  node_id: string;
+  graph_id: string;
+  parent_node_id: string | null;
+  role: string;
+  execution_id: string | null;
+  decision_id: string | null;
+  status: string;
+  sort_order: number;
+  created_at: Date;
+  updated_at: Date;
+}): OrchestrationNode {
+  return {
+    node_id: row.node_id,
+    graph_id: row.graph_id,
+    parent_node_id: row.parent_node_id,
+    role: row.role as OrchestrationNode['role'],
+    execution_id: row.execution_id,
+    decision_id: row.decision_id,
+    status: row.status as OrchestrationNode['status'],
+    sort_order: row.sort_order,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
   };
 }
 
@@ -945,6 +1102,260 @@ export class PrismaAuditRepository implements AuditRepository {
   }
 }
 
+export class PrismaModelOfferingRepository implements ModelOfferingRepository {
+  constructor(private readonly prisma: PrismaClient) {}
+
+  async getOffering(offering_id: string): Promise<ModelOffering | null> {
+    const row = await this.prisma.modelOffering.findUnique({ where: { offering_id } });
+    return row ? rowToModelOffering(row) : null;
+  }
+
+  async listOfferings(filters?: {
+    provider?: string;
+    capability?: string;
+    availability?: AvailabilityStatus;
+  }): Promise<ModelOffering[]> {
+    const where: Record<string, unknown> = {};
+    if (filters?.provider) where.provider = filters.provider;
+    if (filters?.availability) where.availability_status = filters.availability;
+
+    const rows = await this.prisma.modelOffering.findMany({
+      where,
+      orderBy: { provider: 'asc' },
+    });
+
+    let results = rows.map(rowToModelOffering);
+    if (filters?.capability) {
+      results = results.filter((o) => o.capabilities.includes(filters.capability!));
+    }
+    return results;
+  }
+
+  async upsertOffering(
+    offering: Omit<ModelOffering, 'effective_at' | 'refreshed_at'>
+  ): Promise<ModelOffering> {
+    const now = new Date();
+    const row = await this.prisma.modelOffering.upsert({
+      where: { offering_id: offering.offering_id },
+      create: {
+        offering_id: offering.offering_id,
+        provider: offering.provider,
+        model_id: offering.model_id,
+        display_name: offering.display_name,
+        capabilities: json(offering.capabilities),
+        context_window: offering.context_window,
+        max_output_tokens: offering.max_output_tokens,
+        supports_tools: offering.supports_tools,
+        supports_vision: offering.supports_vision,
+        supports_audio: offering.supports_audio,
+        supports_structured_output: offering.supports_structured_output,
+        supports_reasoning: offering.supports_reasoning,
+        pricing_input: offering.pricing.input_cost_per_1k_tokens,
+        pricing_output: offering.pricing.output_cost_per_1k_tokens,
+        pricing_currency: offering.pricing.currency,
+        pricing_units: offering.pricing.units,
+        pricing_source: offering.pricing.source,
+        pricing_effective_at: offering.pricing.effective_at,
+        pricing_refreshed_at: offering.pricing.refreshed_at,
+        pricing_version: offering.pricing.version,
+        availability_status: offering.availability_status,
+        health_state: offering.health_state,
+        version: offering.version,
+      },
+      update: {
+        provider: offering.provider,
+        model_id: offering.model_id,
+        display_name: offering.display_name,
+        capabilities: json(offering.capabilities),
+        context_window: offering.context_window,
+        max_output_tokens: offering.max_output_tokens,
+        supports_tools: offering.supports_tools,
+        supports_vision: offering.supports_vision,
+        supports_audio: offering.supports_audio,
+        supports_structured_output: offering.supports_structured_output,
+        supports_reasoning: offering.supports_reasoning,
+        pricing_input: offering.pricing.input_cost_per_1k_tokens,
+        pricing_output: offering.pricing.output_cost_per_1k_tokens,
+        pricing_currency: offering.pricing.currency,
+        pricing_units: offering.pricing.units,
+        pricing_source: offering.pricing.source,
+        pricing_effective_at: offering.pricing.effective_at,
+        pricing_refreshed_at: offering.pricing.refreshed_at,
+        pricing_version: offering.pricing.version,
+        availability_status: offering.availability_status,
+        health_state: offering.health_state,
+        version: offering.version,
+        refreshed_at: now,
+      },
+    });
+    return rowToModelOffering(row);
+  }
+
+  async updateHealth(offering_id: string, health_state: ModelOffering['health_state']): Promise<void> {
+    await this.prisma.modelOffering.updateMany({
+      where: { offering_id },
+      data: { health_state },
+    });
+  }
+}
+
+export class PrismaModelEvidenceRepository implements ModelEvidenceRepository {
+  constructor(private readonly prisma: PrismaClient) {}
+
+  async getEvidence(evidence_id: string): Promise<ModelQualityEvidence | null> {
+    const row = await this.prisma.modelQualityEvidence.findUnique({ where: { evidence_id } });
+    return row ? rowToModelQualityEvidence(row) : null;
+  }
+
+  async listEvidenceForOffering(offering_id: string): Promise<ModelQualityEvidence[]> {
+    const rows = await this.prisma.modelQualityEvidence.findMany({
+      where: { offering_id },
+      orderBy: { measured_at: 'desc' },
+    });
+    return rows.map(rowToModelQualityEvidence);
+  }
+
+  async listEvidenceForModel(provider: string, model_id: string): Promise<ModelQualityEvidence[]> {
+    const offering = await this.prisma.modelOffering.findUnique({
+      where: { provider_model_id: { provider, model_id } },
+    });
+    if (!offering) return [];
+    const rows = await this.prisma.modelQualityEvidence.findMany({
+      where: { offering_id: offering.offering_id },
+      orderBy: { measured_at: 'desc' },
+    });
+    return rows.map(rowToModelQualityEvidence);
+  }
+
+  async upsertEvidence(
+    evidence: Omit<ModelQualityEvidence, 'ingested_at'>
+  ): Promise<ModelQualityEvidence> {
+    const row = await this.prisma.modelQualityEvidence.upsert({
+      where: { evidence_id: evidence.evidence_id },
+      create: {
+        evidence_id: evidence.evidence_id,
+        offering_id: evidence.offering_id,
+        evidence_type: evidence.evidence_type,
+        benchmark: evidence.benchmark,
+        domain: evidence.domain,
+        task_family: evidence.task_family,
+        score: evidence.score,
+        score_scale: evidence.score_scale,
+        higher_is_better: evidence.higher_is_better,
+        sample_size: evidence.sample_size,
+        source: evidence.source,
+        source_reference: evidence.source_reference,
+        measured_at: evidence.measured_at,
+        version: evidence.version,
+        confidence: evidence.confidence,
+      },
+      update: {
+        offering_id: evidence.offering_id,
+        evidence_type: evidence.evidence_type,
+        benchmark: evidence.benchmark,
+        domain: evidence.domain,
+        task_family: evidence.task_family,
+        score: evidence.score,
+        score_scale: evidence.score_scale,
+        higher_is_better: evidence.higher_is_better,
+        sample_size: evidence.sample_size,
+        source: evidence.source,
+        source_reference: evidence.source_reference,
+        measured_at: evidence.measured_at,
+        version: evidence.version,
+        confidence: evidence.confidence,
+      },
+    });
+    return rowToModelQualityEvidence(row);
+  }
+}
+
+export class PrismaOrchestrationGraphRepository implements OrchestrationGraphRepository {
+  constructor(private readonly prisma: PrismaClient) {}
+
+  async getGraph(graph_id: string): Promise<OrchestrationGraph | null> {
+    const row = await this.prisma.orchestrationGraph.findUnique({ where: { graph_id } });
+    return row ? rowToOrchestrationGraph(row) : null;
+  }
+
+  async getGraphByExecution(execution_id: string): Promise<OrchestrationGraph | null> {
+    const row = await this.prisma.orchestrationGraph.findUnique({
+      where: { execution_id },
+    });
+    return row ? rowToOrchestrationGraph(row) : null;
+  }
+
+  async createGraph(
+    graph: Omit<OrchestrationGraph, 'created_at' | 'updated_at'>
+  ): Promise<OrchestrationGraph> {
+    const row = await this.prisma.orchestrationGraph.create({
+      data: {
+        graph_id: graph.graph_id,
+        execution_id: graph.execution_id,
+        account_id: graph.account_id,
+        task_id: graph.task_id,
+        mode: graph.mode,
+        status: graph.status,
+        max_nodes: graph.max_nodes,
+        max_parallel: graph.max_parallel,
+      },
+    });
+    return rowToOrchestrationGraph(row);
+  }
+
+  async updateGraphStatus(
+    graph_id: string,
+    status: OrchestrationGraph['status']
+  ): Promise<void> {
+    const result = await this.prisma.orchestrationGraph.updateMany({
+      where: { graph_id },
+      data: { status },
+    });
+    if (result.count === 0) throw new Error('state_conflict');
+  }
+
+  async listNodes(graph_id: string): Promise<OrchestrationNode[]> {
+    const rows = await this.prisma.orchestrationNode.findMany({
+      where: { graph_id },
+      orderBy: { sort_order: 'asc' },
+    });
+    return rows.map(rowToOrchestrationNode);
+  }
+
+  async createNode(
+    node: Omit<OrchestrationNode, 'created_at' | 'updated_at'>
+  ): Promise<OrchestrationNode> {
+    const row = await this.prisma.orchestrationNode.create({
+      data: {
+        node_id: node.node_id,
+        graph_id: node.graph_id,
+        parent_node_id: node.parent_node_id,
+        role: node.role,
+        execution_id: node.execution_id,
+        decision_id: node.decision_id,
+        status: node.status,
+        sort_order: node.sort_order,
+      },
+    });
+    return rowToOrchestrationNode(row);
+  }
+
+  async updateNodeStatus(
+    node_id: string,
+    status: OrchestrationNode['status']
+  ): Promise<void> {
+    const result = await this.prisma.orchestrationNode.updateMany({
+      where: { node_id },
+      data: { status },
+    });
+    if (result.count === 0) throw new Error('state_conflict');
+  }
+
+  async countNodes(graph_id: string): Promise<number> {
+    return this.prisma.orchestrationNode.count({ where: { graph_id } });
+  }
+}
+
 export interface PrismaRepositories {
   principals: PrismaPrincipalRepository;
   accounts: PrismaAccountRepository;
@@ -957,6 +1368,9 @@ export interface PrismaRepositories {
   executions: PrismaExecutionRepository;
   usage: PrismaUsageRepository;
   audit: PrismaAuditRepository;
+  modelOfferings: PrismaModelOfferingRepository;
+  modelEvidence: PrismaModelEvidenceRepository;
+  orchestrationGraphs: PrismaOrchestrationGraphRepository;
 }
 
 export function createPrismaRepositories(prisma: PrismaClient): PrismaRepositories {
@@ -972,5 +1386,8 @@ export function createPrismaRepositories(prisma: PrismaClient): PrismaRepositori
     executions: new PrismaExecutionRepository(prisma),
     usage: new PrismaUsageRepository(prisma),
     audit: new PrismaAuditRepository(prisma),
+    modelOfferings: new PrismaModelOfferingRepository(prisma),
+    modelEvidence: new PrismaModelEvidenceRepository(prisma),
+    orchestrationGraphs: new PrismaOrchestrationGraphRepository(prisma),
   };
 }
