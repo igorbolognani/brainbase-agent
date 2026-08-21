@@ -5,8 +5,7 @@ import {
   clearModelPricing,
 } from '../openai-adapter.js';
 import { GeminiAdapter } from '../gemini-adapter.js';
-import { ProviderHealthTracker } from '../provider-health.js';
-import type { ProviderExecutionRequest } from '../provider-adapter.js';
+import { ProviderHealthTracker, type ProviderExecutionRequest } from '@gptrouter/domain';
 
 const mockCredentialResolver = { resolveCredential: async () => 'test-api-key' } as const;
 

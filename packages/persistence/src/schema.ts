@@ -166,6 +166,32 @@ export const routing_decisions = sqliteTable(
   ]
 );
 
+export const executions = sqliteTable(
+  'executions',
+  {
+    execution_id: text('execution_id').primaryKey(),
+    account_id: text('account_id')
+      .notNull()
+      .references(() => accounts.account_id),
+    task_id: text('task_id')
+      .notNull()
+      .references(() => tasks.task_id),
+    root_decision_id: text('root_decision_id')
+      .notNull()
+      .references(() => routing_decisions.decision_id),
+    idempotency_key: text('idempotency_key').notNull(),
+    command_fingerprint: text('command_fingerprint'),
+    status: text('status').notNull(),
+    created_at: text('created_at').notNull(),
+  },
+  (t) => [
+    uniqueIndex('executions_account_idempotency').on(t.account_id, t.idempotency_key),
+    index('executions_account').on(t.account_id),
+    index('executions_task').on(t.task_id),
+    index('executions_status').on(t.status),
+  ]
+);
+
 export const execution_attempts = sqliteTable(
   'execution_attempts',
   {
@@ -194,7 +220,6 @@ export const execution_attempts = sqliteTable(
     created_at: text('created_at').notNull(),
   },
   (t) => [
-    uniqueIndex('attempts_idempotency').on(t.account_id, t.idempotency_key),
     index('attempts_execution').on(t.execution_id),
     index('attempts_task').on(t.task_id),
     index('attempts_decision').on(t.decision_id),

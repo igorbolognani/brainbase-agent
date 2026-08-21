@@ -14,6 +14,7 @@ import type {
   Account,
   AccountMembership,
   Connection,
+  Execution,
   ModelRoute,
   Principal,
   RoutingPolicy,
@@ -34,6 +35,7 @@ import {
   routing_policies,
   tasks,
   routing_decisions,
+  executions,
   execution_attempts,
   usage_records,
   audit_events,
@@ -47,6 +49,7 @@ import {
   rowToPolicy,
   rowToTask,
   rowToDecision,
+  rowToExecution,
   rowToAttempt,
   rowToUsage,
   rowToAudit,
@@ -432,6 +435,119 @@ export class PrismaDecisionRepository implements DecisionRepository {
 export class PrismaExecutionRepository implements ExecutionRepository {
   constructor(private readonly db: DrizzleDB) {}
 
+  async getExecution(execution_id: string): Promise<Execution | null> {
+    const row = this.db
+      .select()
+      .from(executions)
+      .where(eq(executions.execution_id, execution_id))
+      .get();
+    return row ? rowToExecution(row) : null;
+  }
+
+  async getExecutionByIdempotencyKey(
+    account_id: string,
+    idempotency_key: string
+  ): Promise<Execution | null> {
+    const row = this.db
+      .select()
+      .from(executions)
+      .where(
+        and(eq(executions.account_id, account_id), eq(executions.idempotency_key, idempotency_key))
+      )
+      .get();
+    return row ? rowToExecution(row) : null;
+  }
+
+  async createExecution(execution: Omit<Execution, 'created_at'>): Promise<Execution> {
+    const ts = now();
+    try {
+      this.db
+        .insert(executions)
+        .values({ ...execution, created_at: ts })
+        .run();
+    } catch (error: unknown) {
+      if (isUniqueConstraint(error)) throw idempotencyConflict();
+      throw error;
+    }
+    return { ...execution, created_at: new Date(ts) };
+  }
+
+  async createExecutionWithRootAttempt(
+    execution: Omit<Execution, 'created_at'>,
+    attempt: Omit<ExecutionAttempt, 'created_at'>
+  ): Promise<{ execution: Execution; attempt: ExecutionAttempt }> {
+    const ts = now();
+    try {
+      this.db.$client.transaction(() => {
+        this.db.$client
+          .prepare(
+            'INSERT INTO executions (execution_id, account_id, task_id, root_decision_id, idempotency_key, command_fingerprint, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+          )
+          .run(
+            execution.execution_id,
+            execution.account_id,
+            execution.task_id,
+            execution.root_decision_id,
+            execution.idempotency_key,
+            execution.command_fingerprint ?? null,
+            execution.status,
+            ts
+          );
+        this.db.$client
+          .prepare(
+            'INSERT INTO execution_attempts (attempt_id, account_id, execution_id, task_id, decision_id, idempotency_key, status, started_at, completed_at, cancel_requested_at, cancelled_at, retry_count, retry_policy, parent_attempt_id, verification_outcome, failure_code, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+          )
+          .run(
+            attempt.attempt_id,
+            attempt.account_id,
+            attempt.execution_id,
+            attempt.task_id,
+            attempt.decision_id,
+            attempt.idempotency_key,
+            attempt.status,
+            attempt.started_at?.toISOString() ?? null,
+            attempt.completed_at?.toISOString() ?? null,
+            attempt.cancel_requested_at?.toISOString() ?? null,
+            attempt.cancelled_at?.toISOString() ?? null,
+            attempt.retry_count,
+            attempt.retry_policy ? JSON.stringify(attempt.retry_policy) : null,
+            attempt.parent_attempt_id,
+            attempt.verification_outcome,
+            attempt.failure_code,
+            ts
+          );
+      })();
+    } catch (error: unknown) {
+      if (isUniqueConstraint(error)) throw idempotencyConflict();
+      throw error;
+    }
+    return {
+      execution: { ...execution, created_at: new Date(ts) },
+      attempt: { ...attempt, created_at: new Date(ts) },
+    };
+  }
+
+  async updateExecutionStatus(
+    execution_id: string,
+    status: Execution['status'],
+    expected_status?: Execution['status']
+  ): Promise<void> {
+    const result = expected_status
+      ? this.db
+          .update(executions)
+          .set({ status })
+          .where(
+            and(eq(executions.execution_id, execution_id), eq(executions.status, expected_status))
+          )
+          .run()
+      : this.db
+          .update(executions)
+          .set({ status })
+          .where(eq(executions.execution_id, execution_id))
+          .run();
+    if (result.changes === 0) throw new Error('state_conflict');
+  }
+
   async getAttempt(attempt_id: string): Promise<ExecutionAttempt | null> {
     const row = this.db
       .select()
@@ -451,7 +567,8 @@ export class PrismaExecutionRepository implements ExecutionRepository {
       .where(
         and(
           eq(execution_attempts.account_id, account_id),
-          eq(execution_attempts.idempotency_key, idempotency_key)
+          eq(execution_attempts.idempotency_key, idempotency_key),
+          sql`${execution_attempts.parent_attempt_id} IS NULL`
         )
       )
       .get();
@@ -486,11 +603,7 @@ export class PrismaExecutionRepository implements ExecutionRepository {
       return { ...attempt, created_at: new Date(ts) };
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : '';
-      if (msg.includes('UNIQUE') || msg.includes('attempts_idempotency')) {
-        const conflictError = new Error('idempotency_conflict') as Error & { code: string };
-        conflictError.code = 'idempotency_conflict';
-        throw conflictError;
-      }
+      if (msg.includes('UNIQUE')) throw idempotencyConflict();
       throw error;
     }
   }
@@ -549,6 +662,16 @@ export class PrismaExecutionRepository implements ExecutionRepository {
       throw new Error('state_conflict');
     }
   }
+}
+
+function isUniqueConstraint(error: unknown): boolean {
+  return error instanceof Error && error.message.toUpperCase().includes('UNIQUE');
+}
+
+function idempotencyConflict(): Error & { code: string } {
+  const error = new Error('idempotency_conflict') as Error & { code: string };
+  error.code = 'idempotency_conflict';
+  return error;
 }
 
 // ============================================================================

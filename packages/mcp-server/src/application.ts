@@ -8,6 +8,7 @@ import type {
   Connection,
   ConnectionRepository,
   DecisionRepository,
+  Execution,
   ExecutionAttempt,
   ExecutionRepository,
   MembershipRepository,
@@ -22,6 +23,7 @@ import type {
   TaskRepository,
   UsageRecord,
   UsageRepository,
+  OrderingStrategy,
   VerificationOutcome,
 } from '@gptrouter/contracts';
 import {
@@ -52,6 +54,8 @@ import {
 
 export const SYNTHETIC_ACCOUNT_ID = 'account-synthetic-v0';
 export const SYNTHETIC_DATA_MODE = 'synthetic_repository';
+export const PRODUCTION_DATA_MODE = 'postgresql';
+export type RuntimeDataMode = typeof SYNTHETIC_DATA_MODE | typeof PRODUCTION_DATA_MODE;
 export const SYNTHETIC_ISSUER = 'synthetic-issuer';
 
 export interface ListRoutesQuery {
@@ -62,7 +66,7 @@ export interface ListRoutesQuery {
 export interface PlanTaskRequest {
   description: string;
   required_capabilities: string[];
-  ordering_strategy: 'cost';
+  ordering_strategy: OrderingStrategy;
 }
 
 export interface PublicRouteProjection {
@@ -84,7 +88,7 @@ export interface PublicRouteProjection {
     version: string;
   };
   availability_status: ModelRoute['availability_status'];
-  provenance: typeof SYNTHETIC_DATA_MODE;
+  provenance: RuntimeDataMode;
 }
 
 export interface PlannedTaskProjection {
@@ -93,11 +97,11 @@ export interface PlannedTaskProjection {
   status: 'planning';
   description: string;
   required_capabilities: string[];
-  ordering_strategy: 'cost';
+  ordering_strategy: OrderingStrategy;
   selected_route: PublicRouteProjection | null;
   estimated_cost: number | null;
   actual_cost: number;
-  data_mode: typeof SYNTHETIC_DATA_MODE;
+  data_mode: RuntimeDataMode;
   decided_at: string;
   note: string;
 }
@@ -142,12 +146,15 @@ export interface TaskProjection {
   fallback_count: number;
   audit_degraded: boolean;
   actual_cost: number;
+  known_actual_cost: number;
+  unknown_cost_attempt_count: number;
+  cost_complete: boolean;
   estimated_cost: number | null;
   cost_variance: number | null;
   execution_status: ExecutionAttempt['status'] | 'not_started';
   verification_outcome: VerificationOutcome | null;
   cancellation_status: 'not_requested' | 'requested' | 'cancelled';
-  data_mode: typeof SYNTHETIC_DATA_MODE;
+  data_mode: RuntimeDataMode;
 }
 
 export interface PublicRoutingDecision {
@@ -192,16 +199,19 @@ export interface UsageProjection {
   failed_attempts: number;
   cancelled_attempts: number;
   actual_cost: number;
+  known_actual_cost: number;
+  unknown_cost_attempt_count: number;
+  cost_complete: boolean;
   estimated_planned_cost: number;
   actual_usage_records: number;
   cost_variance: number;
   audit_degraded: boolean;
-  data_mode: typeof SYNTHETIC_DATA_MODE;
+  data_mode: RuntimeDataMode;
   note: string;
 }
 
 export interface DashboardRuntimeSummary {
-  data_source: typeof SYNTHETIC_DATA_MODE;
+  data_source: RuntimeDataMode;
   route_count: number;
   task_count: number;
   decision_count: number;
@@ -215,9 +225,9 @@ export interface DashboardRuntimeSummary {
   fallback_count: number;
   audit_degraded: boolean;
   audit_failure_count: number;
-  synthetic_execution_enabled: true;
-  provider_execution_enabled: false;
-  paid_calls_enabled: false;
+  synthetic_execution_enabled: boolean;
+  provider_execution_enabled: boolean;
+  paid_calls_enabled: boolean;
 }
 
 export interface VerifiedExecutionIdentity {
@@ -299,6 +309,7 @@ interface SyntheticStore {
   policies: Map<string, RoutingPolicy>;
   tasks: Map<string, Task>;
   decisions: Map<string, RoutingDecision>;
+  executions: Map<string, Execution>;
   attempts: Map<string, ExecutionAttempt>;
   usage: Map<string, UsageRecord>;
   audit: Map<string, AuditEvent>;
@@ -350,6 +361,7 @@ function createSyntheticRepositories(
     policies: new Map(),
     tasks: new Map(),
     decisions: new Map(),
+    executions: new Map(),
     attempts: new Map(),
     usage: new Map(),
     audit: new Map(),
@@ -533,6 +545,56 @@ function createSyntheticRepositories(
   };
 
   const executions: ExecutionRepository = {
+    async getExecution(execution_id) {
+      const execution = store.executions.get(execution_id);
+      return execution ? clone(execution) : null;
+    },
+    async getExecutionByIdempotencyKey(account_id, idempotency_key) {
+      const execution = [...store.executions.values()].find(
+        (item) => item.account_id === account_id && item.idempotency_key === idempotency_key
+      );
+      return execution ? clone(execution) : null;
+    },
+    async createExecution(execution) {
+      const duplicate = [...store.executions.values()].find(
+        (item) =>
+          item.account_id === execution.account_id &&
+          item.idempotency_key === execution.idempotency_key
+      );
+      if (duplicate) {
+        const error = new Error('idempotency_conflict') as Error & { code: string };
+        error.code = 'idempotency_conflict';
+        throw error;
+      }
+      const created: Execution = { ...execution, created_at: new Date() };
+      store.executions.set(created.execution_id, clone(created));
+      return clone(created);
+    },
+    async createExecutionWithRootAttempt(execution, attempt) {
+      const duplicate = [...store.executions.values()].find(
+        (item) =>
+          item.account_id === execution.account_id &&
+          item.idempotency_key === execution.idempotency_key
+      );
+      if (duplicate) {
+        const error = new Error('idempotency_conflict') as Error & { code: string };
+        error.code = 'idempotency_conflict';
+        throw error;
+      }
+      const createdExecution: Execution = { ...execution, created_at: new Date() };
+      const createdAttempt: ExecutionAttempt = { ...attempt, created_at: new Date() };
+      store.executions.set(createdExecution.execution_id, clone(createdExecution));
+      store.attempts.set(createdAttempt.attempt_id, clone(createdAttempt));
+      return { execution: clone(createdExecution), attempt: clone(createdAttempt) };
+    },
+    async updateExecutionStatus(execution_id, status, expected_status) {
+      const execution = store.executions.get(execution_id);
+      if (!execution) return;
+      if (expected_status !== undefined && execution.status !== expected_status) {
+        throw new Error('state_conflict');
+      }
+      store.executions.set(execution_id, { ...execution, status });
+    },
     async getAttempt(attempt_id) {
       const attempt = store.attempts.get(attempt_id);
       return attempt ? clone(attempt) : null;
@@ -1067,6 +1129,9 @@ export function createSyntheticGPTRouterApplication(
       const latestAttempt = attempts.at(-1) ?? null;
       const estimatedCost = latestDecision?.estimated_cost ?? null;
       const actualCost = taskUsage.reduce((sum, record) => sum + (record.actual_cost ?? 0), 0);
+      const unknownCostAttemptCount = taskUsage.filter(
+        (record) => record.actual_cost === null
+      ).length;
       const auditStatus = {
         audit_degraded: repositories.store.auditFailureCount > 0,
         audit_failure_count: repositories.store.auditFailureCount,
@@ -1113,9 +1178,12 @@ export function createSyntheticGPTRouterApplication(
         fallback_count: decisions.filter((decision) => decision.parent_decision_id).length,
         audit_degraded: auditStatus.audit_degraded,
         actual_cost: actualCost,
+        known_actual_cost: actualCost,
+        unknown_cost_attempt_count: unknownCostAttemptCount,
+        cost_complete: unknownCostAttemptCount === 0,
         estimated_cost: estimatedCost,
         cost_variance:
-          estimatedCost === null
+          estimatedCost === null || unknownCostAttemptCount > 0
             ? null
             : actualCost -
               attempts.reduce(
@@ -1155,6 +1223,8 @@ export function createSyntheticGPTRouterApplication(
         (sum, decision) => sum + (decision.estimated_cost ?? 0),
         0
       );
+      const knownActualCost = usage.reduce((sum, record) => sum + (record.actual_cost ?? 0), 0);
+      const unknownCostAttemptCount = usage.filter((record) => record.actual_cost === null).length;
       return {
         time_range,
         planning_requests: decisions.length,
@@ -1164,10 +1234,16 @@ export function createSyntheticGPTRouterApplication(
         successful_executions: attempts.filter((attempt) => attempt.status === 'completed').length,
         failed_attempts: attempts.filter((attempt) => attempt.status === 'failed').length,
         cancelled_attempts: attempts.filter((attempt) => attempt.status === 'cancelled').length,
-        actual_cost: usage.reduce((sum, record) => sum + (record.actual_cost ?? 0), 0),
+        actual_cost: knownActualCost,
+        known_actual_cost: knownActualCost,
+        unknown_cost_attempt_count: unknownCostAttemptCount,
+        cost_complete: unknownCostAttemptCount === 0,
         estimated_planned_cost: estimatedPlannedCost,
         actual_usage_records: usage.length,
-        cost_variance: usage.reduce((sum, record) => sum + (record.cost_variance ?? 0), 0),
+        cost_variance:
+          unknownCostAttemptCount === 0
+            ? usage.reduce((sum, record) => sum + (record.cost_variance ?? 0), 0)
+            : 0,
         audit_degraded: repositories.store.auditFailureCount > 0,
         data_mode: SYNTHETIC_DATA_MODE,
         note: 'Synthetic execution only. Actual provider execution and paid calls remain disabled.',

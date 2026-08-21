@@ -9,6 +9,7 @@ import type {
   AuditEvent,
   Connection,
   ExecutionAttempt,
+  Execution,
   GatewayConnection,
   ModelMetadata,
   ModelRoute,
@@ -344,6 +345,28 @@ export function rowToAttempt(row: {
     verification_outcome:
       (row.verification_outcome as ExecutionAttempt['verification_outcome']) ?? null,
     failure_code: row.failure_code ?? null,
+    created_at: new Date(row.created_at),
+  };
+}
+
+export function rowToExecution(row: {
+  execution_id: string;
+  account_id: string;
+  task_id: string;
+  root_decision_id: string;
+  idempotency_key: string;
+  command_fingerprint: string | null;
+  status: string;
+  created_at: string;
+}): Execution {
+  return {
+    execution_id: row.execution_id,
+    account_id: row.account_id,
+    task_id: row.task_id,
+    root_decision_id: row.root_decision_id,
+    idempotency_key: row.idempotency_key,
+    command_fingerprint: row.command_fingerprint ?? undefined,
+    status: row.status as Execution['status'],
     created_at: new Date(row.created_at),
   };
 }

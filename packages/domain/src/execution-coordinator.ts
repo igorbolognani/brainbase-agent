@@ -2,6 +2,7 @@ import type {
   AuditRepository,
   AuthorizedExecutionContext,
   DecisionRepository,
+  Execution,
   ExecutionAttempt,
   ExecutionRepository,
   PolicyRepository,
@@ -13,6 +14,7 @@ import type {
   UsageRepository,
   VerificationOutcome,
 } from '@gptrouter/contracts';
+import { createHash } from 'node:crypto';
 import { BudgetEnforcer } from './budget-enforcer.js';
 import { generateId } from './utils.js';
 
@@ -20,6 +22,18 @@ export interface ExecutionRequest {
   task_id: string;
   decision_id: string;
   idempotency_key: string;
+}
+
+/** Stable, secret-free identity for a root execution command. */
+export function executionCommandFingerprint(
+  request: Pick<ExecutionRequest, 'task_id' | 'decision_id'>
+): string {
+  const normalized = JSON.stringify({
+    version: 1,
+    task_id: request.task_id,
+    decision_id: request.decision_id,
+  });
+  return createHash('sha256').update(normalized, 'utf8').digest('hex');
 }
 
 export interface ExecutionInput {
@@ -89,7 +103,8 @@ export type ExecutionRequestErrorCode =
   | 'budget_denied'
   | 'idempotency_conflict'
   | 'usage_reconciliation_failed'
-  | 'fallback_denied';
+  | 'fallback_denied'
+  | 'recovery_required';
 
 /** Errors in the consequential request surface have stable, safe messages. */
 export class ExecutionRequestError extends Error {
@@ -128,6 +143,9 @@ export interface ExecutionProjection {
   estimated_cost: number | null;
   estimated_total_cost: number;
   actual_cost: number;
+  known_actual_cost: number;
+  unknown_cost_attempt_count: number;
+  cost_complete: boolean;
   usage_id: string | null;
   replayed: boolean;
   data_mode: 'synthetic_execution';
@@ -139,6 +157,9 @@ export interface ExecutionCoordinatorRepositories {
   policies: Pick<PolicyRepository, 'getPolicy'>;
   executions: Pick<
     ExecutionRepository,
+    | 'getExecutionByIdempotencyKey'
+    | 'createExecution'
+    | 'createExecutionWithRootAttempt'
     | 'getAttempt'
     | 'getAttemptByIdempotencyKey'
     | 'createAttempt'
@@ -338,6 +359,33 @@ export class ExecutionCoordinator {
     request: ExecutionRequest
   ): Promise<ExecutionProjection> {
     const accountId = context.account.account_id;
+    const commandFingerprint = executionCommandFingerprint(request);
+    const existingExecution =
+      await this.options.repositories.executions.getExecutionByIdempotencyKey?.(
+        accountId,
+        request.idempotency_key
+      );
+    if (existingExecution) {
+      if (
+        existingExecution.task_id !== request.task_id ||
+        existingExecution.root_decision_id !== request.decision_id ||
+        (existingExecution.command_fingerprint !== undefined &&
+          existingExecution.command_fingerprint !== commandFingerprint)
+      ) {
+        throw new IdempotencyConflictError();
+      }
+      const existingAttempt = await this.options.repositories.executions.getAttemptByIdempotencyKey(
+        accountId,
+        request.idempotency_key
+      );
+      if (!existingAttempt) {
+        throw new ExecutionRequestError(
+          'recovery_required',
+          'Execution identity exists without a root attempt; manual recovery is required'
+        );
+      }
+      return this.projectExecution(existingAttempt, context, true);
+    }
     const existing = await this.options.repositories.executions.getAttemptByIdempotencyKey(
       accountId,
       request.idempotency_key
@@ -437,6 +485,7 @@ export class ExecutionCoordinator {
     request: ExecutionRequest
   ): Promise<ExecutionProjection> {
     const repositories = this.options.repositories;
+    const commandFingerprint = executionCommandFingerprint(request);
     const task = await repositories.tasks.getTask(request.task_id);
     if (!task) throw new ExecutionRequestError('task_not_found', 'Task was not found');
     if (task.account_id !== context.account.account_id) {
@@ -464,33 +513,64 @@ export class ExecutionCoordinator {
     await this.assertBudget(context, decision, policy);
 
     const executionId = `execution_${generateId()}`;
+    const execution: Omit<Execution, 'created_at'> = {
+      execution_id: executionId,
+      account_id: context.account.account_id,
+      task_id: task.task_id,
+      root_decision_id: decision.decision_id,
+      idempotency_key: request.idempotency_key,
+      command_fingerprint: commandFingerprint,
+      status: 'pending',
+    };
+    const rootAttemptInput: Omit<ExecutionAttempt, 'created_at'> = {
+      attempt_id: `attempt_${generateId()}`,
+      account_id: context.account.account_id,
+      execution_id: executionId,
+      task_id: task.task_id,
+      decision_id: decision.decision_id,
+      idempotency_key: request.idempotency_key,
+      status: 'pending',
+      started_at: null,
+      completed_at: null,
+      cancel_requested_at: null,
+      cancelled_at: null,
+      retry_count: 0,
+      retry_policy: retryPolicy,
+      parent_attempt_id: null,
+      verification_outcome: null,
+      failure_code: null,
+    };
     let rootAttempt: ExecutionAttempt;
     try {
-      rootAttempt = await repositories.executions.createAttempt({
-        attempt_id: `attempt_${generateId()}`,
-        account_id: context.account.account_id,
-        execution_id: executionId,
-        task_id: task.task_id,
-        decision_id: decision.decision_id,
-        idempotency_key: request.idempotency_key,
-        status: 'pending',
-        started_at: null,
-        completed_at: null,
-        cancel_requested_at: null,
-        cancelled_at: null,
-        retry_count: 0,
-        retry_policy: retryPolicy,
-        parent_attempt_id: null,
-        verification_outcome: null,
-        failure_code: null,
-      });
+      if (repositories.executions.createExecutionWithRootAttempt) {
+        const created = await repositories.executions.createExecutionWithRootAttempt(
+          execution,
+          rootAttemptInput
+        );
+        rootAttempt = created.attempt;
+      } else {
+        await repositories.executions.createExecution?.(execution);
+        rootAttempt = await repositories.executions.createAttempt(rootAttemptInput);
+      }
     } catch (error) {
       if (!isIdempotencyConflict(error)) throw error;
+      const concurrentExecution = await repositories.executions.getExecutionByIdempotencyKey?.(
+        context.account.account_id,
+        request.idempotency_key
+      );
+      if (
+        concurrentExecution &&
+        (concurrentExecution.task_id !== request.task_id ||
+          concurrentExecution.root_decision_id !== request.decision_id)
+      ) {
+        throw new IdempotencyConflictError();
+      }
       const concurrent = await repositories.executions.getAttemptByIdempotencyKey(
         context.account.account_id,
         request.idempotency_key
       );
-      if (!concurrent) throw new IdempotencyConflictError();
+      if (!concurrent)
+        throw new ExecutionRequestError('recovery_required', 'Execution is being recovered');
       return this.replayOrReject(concurrent, context, request);
     }
 
@@ -1017,6 +1097,9 @@ export class ExecutionCoordinator {
         0
       ),
       actual_cost: records.reduce((sum, record) => sum + (record.actual_cost ?? 0), 0),
+      known_actual_cost: records.reduce((sum, record) => sum + (record.actual_cost ?? 0), 0),
+      unknown_cost_attempt_count: records.filter((record) => record.actual_cost === null).length,
+      cost_complete: records.every((record) => record.actual_cost !== null),
       usage_id: records.at(-1)?.usage_id ?? null,
       replayed,
       data_mode: 'synthetic_execution',

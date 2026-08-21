@@ -61,6 +61,11 @@ export interface ProviderAdapter {
 
 export interface ProviderAdapterRegistry {
   getAdapter(provider: string, route_type?: 'provider' | 'gateway'): ProviderAdapter | null;
+  registerAdapter?(
+    provider: string,
+    adapter: ProviderAdapter,
+    route_type?: 'provider' | 'gateway'
+  ): void;
 }
 
 export interface FakeProviderAdapterOptions {
@@ -186,19 +191,29 @@ export class FakeProviderAdapter implements ProviderAdapter {
 
 export class DefaultProviderAdapterRegistry implements ProviderAdapterRegistry {
   private readonly adapters = new Map<string, ProviderAdapter>();
+  private readonly gatewayAdapters = new Map<string, ProviderAdapter>();
   private defaultAdapter: ProviderAdapter | null = null;
 
-  registerAdapter(provider: string, adapter: ProviderAdapter): void {
-    this.adapters.set(provider.toLowerCase(), adapter);
+  registerAdapter(
+    provider: string,
+    adapter: ProviderAdapter,
+    route_type: 'provider' | 'gateway' = 'provider'
+  ): void {
+    const target = route_type === 'gateway' ? this.gatewayAdapters : this.adapters;
+    target.set(provider.toLowerCase(), adapter);
   }
 
   setDefaultAdapter(adapter: ProviderAdapter): void {
     this.defaultAdapter = adapter;
   }
 
-  getAdapter(provider: string, _route_type?: 'provider' | 'gateway'): ProviderAdapter | null {
+  getAdapter(
+    provider: string,
+    route_type: 'provider' | 'gateway' = 'provider'
+  ): ProviderAdapter | null {
     const key = provider.toLowerCase();
-    return this.adapters.get(key) ?? this.defaultAdapter ?? null;
+    const target = route_type === 'gateway' ? this.gatewayAdapters : this.adapters;
+    return target.get(key) ?? (route_type === 'provider' ? this.defaultAdapter : null);
   }
 }
 

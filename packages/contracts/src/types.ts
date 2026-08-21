@@ -327,6 +327,8 @@ export interface Execution {
   task_id: string;
   root_decision_id: string;
   idempotency_key: string;
+  /** Stable hash of the normalized root execution command. */
+  command_fingerprint?: string;
   status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
   created_at: Date;
 }

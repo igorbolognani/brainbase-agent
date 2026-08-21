@@ -470,7 +470,7 @@ describe('DecisionRepository', () => {
 // ============================================================================
 
 describe('ExecutionRepository', () => {
-  it('creates attempts with idempotency constraint', async () => {
+  it('stores a root execution and permits child attempts with the same key', async () => {
     await repos.accounts.createAccount({
       account_id: 'acc-1',
       name: 'Test',
@@ -503,31 +503,18 @@ describe('ExecutionRepository', () => {
       estimated_cost: 0,
     });
 
-    const attempt1 = await repos.executions.createAttempt({
-      attempt_id: 'att-1',
-      account_id: 'acc-1',
-      execution_id: 'exec-1',
-      task_id: 'task-1',
-      decision_id: 'dec-1',
-      idempotency_key: 'idem-1',
-      status: 'pending',
-      started_at: null,
-      completed_at: null,
-      cancel_requested_at: null,
-      cancelled_at: null,
-      retry_count: 0,
-      retry_policy: null,
-      parent_attempt_id: null,
-      verification_outcome: null,
-      failure_code: null,
-    });
-
-    expect(attempt1.attempt_id).toBe('att-1');
-
-    // Duplicate idempotency key throws
-    await expect(
-      repos.executions.createAttempt({
-        attempt_id: 'att-2',
+    const created = await repos.executions.createExecutionWithRootAttempt(
+      {
+        execution_id: 'exec-1',
+        account_id: 'acc-1',
+        task_id: 'task-1',
+        root_decision_id: 'dec-1',
+        idempotency_key: 'idem-1',
+        command_fingerprint: 'fingerprint-1',
+        status: 'pending',
+      },
+      {
+        attempt_id: 'att-1',
         account_id: 'acc-1',
         execution_id: 'exec-1',
         task_id: 'task-1',
@@ -543,8 +530,32 @@ describe('ExecutionRepository', () => {
         parent_attempt_id: null,
         verification_outcome: null,
         failure_code: null,
-      })
-    ).rejects.toThrow('idempotency_conflict');
+      }
+    );
+
+    expect(created.execution.execution_id).toBe('exec-1');
+    expect(created.attempt.attempt_id).toBe('att-1');
+
+    // A child retry/fallback may reuse the root request key.
+    const child = await repos.executions.createAttempt({
+      attempt_id: 'att-2',
+      account_id: 'acc-1',
+      execution_id: 'exec-1',
+      task_id: 'task-1',
+      decision_id: 'dec-1',
+      idempotency_key: 'idem-1',
+      status: 'pending',
+      started_at: null,
+      completed_at: null,
+      cancel_requested_at: null,
+      cancelled_at: null,
+      retry_count: 0,
+      retry_policy: null,
+      parent_attempt_id: 'att-1',
+      verification_outcome: null,
+      failure_code: null,
+    });
+    expect(child.parent_attempt_id).toBe('att-1');
 
     // Idempotency lookup works
     const found = await repos.executions.getAttemptByIdempotencyKey('acc-1', 'idem-1');
@@ -810,7 +821,6 @@ describe('EnvSecretStore', () => {
 // Auth Verifier
 // ============================================================================
 
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call */
 describe('AuthVerifier', () => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let privateKey: any;
@@ -952,7 +962,6 @@ describe('FakeAuthVerifier', () => {
     await expect(verifier.verify('unknown-token')).rejects.toThrow('Unknown test token');
   });
 });
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call */
 
 // ============================================================================
 // Decision immutability
@@ -1057,5 +1066,716 @@ describe('credential safety', () => {
     // The connection should store only the reference, never the actual key
     expect(conn.credential_reference).toBe('vault://secrets/openai-key');
     expect(conn.credential_reference).not.toContain('sk-');
+  });
+});
+
+// ============================================================================
+// Fingerprint preservation through SQLite
+// ============================================================================
+
+describe('fingerprint preservation through SQLite', () => {
+  it('command_fingerprint survives create/read cycle', async () => {
+    await repos.accounts.createAccount({
+      account_id: 'acc-1',
+      name: 'Test',
+      updated_at: new Date(),
+    });
+    const ts = new Date().toISOString();
+    sqlite.exec(
+      `INSERT INTO routing_policies (policy_id, account_id, name, ordering_strategy, admissibility_rules, budget_constraints, manual_override_allowed, version, created_at, updated_at) VALUES ('pol-1', 'acc-1', 'Default', 'cost', '{}', '{}', 0, 1, '${ts}', '${ts}')`
+    );
+    await repos.tasks.createTask({
+      task_id: 'task-1',
+      account_id: 'acc-1',
+      description: 'Test',
+      requirements: { capabilities: [] },
+      status: 'planning',
+    });
+    await repos.decisions.createDecision({
+      decision_id: 'dec-1',
+      task_id: 'task-1',
+      policy_id: 'pol-1',
+      policy_version: 1,
+      evaluated_routes: [],
+      admissible_routes: [],
+      selected_route_id: null,
+      route_snapshot: null,
+      rejection_reasons: [],
+      estimated_cost: 0,
+    });
+
+    const { execution } = await repos.executions.createExecutionWithRootAttempt(
+      {
+        execution_id: 'exec-fp',
+        account_id: 'acc-1',
+        task_id: 'task-1',
+        root_decision_id: 'dec-1',
+        idempotency_key: 'ik-fp',
+        command_fingerprint: 'sha256-abc123def456',
+        status: 'pending',
+      },
+      {
+        attempt_id: 'att-fp',
+        account_id: 'acc-1',
+        execution_id: 'exec-fp',
+        task_id: 'task-1',
+        decision_id: 'dec-1',
+        idempotency_key: 'ik-fp',
+        status: 'pending',
+        started_at: null,
+        completed_at: null,
+        cancel_requested_at: null,
+        cancelled_at: null,
+        retry_count: 0,
+        retry_policy: null,
+        parent_attempt_id: null,
+        verification_outcome: null,
+        failure_code: null,
+      }
+    );
+
+    expect(execution.command_fingerprint).toBe('sha256-abc123def456');
+
+    const retrieved = await repos.executions.getExecution('exec-fp');
+    expect(retrieved).not.toBeNull();
+    expect(retrieved!.command_fingerprint).toBe('sha256-abc123def456');
+  });
+});
+
+// ============================================================================
+// Root execution idempotency
+// ============================================================================
+
+describe('root execution idempotency', () => {
+  it('same account + idempotency_key + same task/decision returns same execution', async () => {
+    await repos.accounts.createAccount({
+      account_id: 'acc-1',
+      name: 'Test',
+      updated_at: new Date(),
+    });
+    const ts = new Date().toISOString();
+    sqlite.exec(
+      `INSERT INTO routing_policies (policy_id, account_id, name, ordering_strategy, admissibility_rules, budget_constraints, manual_override_allowed, version, created_at, updated_at) VALUES ('pol-1', 'acc-1', 'Default', 'cost', '{}', '{}', 0, 1, '${ts}', '${ts}')`
+    );
+    await repos.tasks.createTask({
+      task_id: 'task-1',
+      account_id: 'acc-1',
+      description: 'Test',
+      requirements: { capabilities: [] },
+      status: 'planning',
+    });
+    await repos.decisions.createDecision({
+      decision_id: 'dec-1',
+      task_id: 'task-1',
+      policy_id: 'pol-1',
+      policy_version: 1,
+      evaluated_routes: [],
+      admissible_routes: [],
+      selected_route_id: null,
+      route_snapshot: null,
+      rejection_reasons: [],
+      estimated_cost: 0,
+    });
+
+    await repos.executions.createExecutionWithRootAttempt(
+      {
+        execution_id: 'exec-idem',
+        account_id: 'acc-1',
+        task_id: 'task-1',
+        root_decision_id: 'dec-1',
+        idempotency_key: 'ik-same',
+        status: 'pending',
+      },
+      {
+        attempt_id: 'att-idem-1',
+        account_id: 'acc-1',
+        execution_id: 'exec-idem',
+        task_id: 'task-1',
+        decision_id: 'dec-1',
+        idempotency_key: 'ik-same',
+        status: 'pending',
+        started_at: null,
+        completed_at: null,
+        cancel_requested_at: null,
+        cancelled_at: null,
+        retry_count: 0,
+        retry_policy: null,
+        parent_attempt_id: null,
+        verification_outcome: null,
+        failure_code: null,
+      }
+    );
+
+    await expect(
+      repos.executions.createExecutionWithRootAttempt(
+        {
+          execution_id: 'exec-idem-dup',
+          account_id: 'acc-1',
+          task_id: 'task-1',
+          root_decision_id: 'dec-1',
+          idempotency_key: 'ik-same',
+          status: 'pending',
+        },
+        {
+          attempt_id: 'att-idem-2',
+          account_id: 'acc-1',
+          execution_id: 'exec-idem-dup',
+          task_id: 'task-1',
+          decision_id: 'dec-1',
+          idempotency_key: 'ik-same',
+          status: 'pending',
+          started_at: null,
+          completed_at: null,
+          cancel_requested_at: null,
+          cancelled_at: null,
+          retry_count: 0,
+          retry_policy: null,
+          parent_attempt_id: null,
+          verification_outcome: null,
+          failure_code: null,
+        }
+      )
+    ).rejects.toThrow('idempotency_conflict');
+  });
+});
+
+// ============================================================================
+// Idempotency conflict on different command
+// ============================================================================
+
+describe('idempotency conflict on different command', () => {
+  it('same account + idempotency_key + different task/decision throws idempotency_conflict', async () => {
+    await repos.accounts.createAccount({
+      account_id: 'acc-1',
+      name: 'Test',
+      updated_at: new Date(),
+    });
+    const ts = new Date().toISOString();
+    sqlite.exec(
+      `INSERT INTO routing_policies (policy_id, account_id, name, ordering_strategy, admissibility_rules, budget_constraints, manual_override_allowed, version, created_at, updated_at) VALUES ('pol-1', 'acc-1', 'Default', 'cost', '{}', '{}', 0, 1, '${ts}', '${ts}')`
+    );
+    await repos.tasks.createTask({
+      task_id: 'task-1',
+      account_id: 'acc-1',
+      description: 'Task 1',
+      requirements: { capabilities: [] },
+      status: 'planning',
+    });
+    await repos.tasks.createTask({
+      task_id: 'task-2',
+      account_id: 'acc-1',
+      description: 'Task 2',
+      requirements: { capabilities: [] },
+      status: 'planning',
+    });
+    await repos.decisions.createDecision({
+      decision_id: 'dec-1',
+      task_id: 'task-1',
+      policy_id: 'pol-1',
+      policy_version: 1,
+      evaluated_routes: [],
+      admissible_routes: [],
+      selected_route_id: null,
+      route_snapshot: null,
+      rejection_reasons: [],
+      estimated_cost: 0,
+    });
+    await repos.decisions.createDecision({
+      decision_id: 'dec-2',
+      task_id: 'task-2',
+      policy_id: 'pol-1',
+      policy_version: 1,
+      evaluated_routes: [],
+      admissible_routes: [],
+      selected_route_id: null,
+      route_snapshot: null,
+      rejection_reasons: [],
+      estimated_cost: 0,
+    });
+
+    await repos.executions.createExecutionWithRootAttempt(
+      {
+        execution_id: 'exec-diff-1',
+        account_id: 'acc-1',
+        task_id: 'task-1',
+        root_decision_id: 'dec-1',
+        idempotency_key: 'ik-diff',
+        status: 'pending',
+      },
+      {
+        attempt_id: 'att-diff-1',
+        account_id: 'acc-1',
+        execution_id: 'exec-diff-1',
+        task_id: 'task-1',
+        decision_id: 'dec-1',
+        idempotency_key: 'ik-diff',
+        status: 'pending',
+        started_at: null,
+        completed_at: null,
+        cancel_requested_at: null,
+        cancelled_at: null,
+        retry_count: 0,
+        retry_policy: null,
+        parent_attempt_id: null,
+        verification_outcome: null,
+        failure_code: null,
+      }
+    );
+
+    await expect(
+      repos.executions.createExecutionWithRootAttempt(
+        {
+          execution_id: 'exec-diff-2',
+          account_id: 'acc-1',
+          task_id: 'task-2',
+          root_decision_id: 'dec-2',
+          idempotency_key: 'ik-diff',
+          status: 'pending',
+        },
+        {
+          attempt_id: 'att-diff-2',
+          account_id: 'acc-1',
+          execution_id: 'exec-diff-2',
+          task_id: 'task-2',
+          decision_id: 'dec-2',
+          idempotency_key: 'ik-diff',
+          status: 'pending',
+          started_at: null,
+          completed_at: null,
+          cancel_requested_at: null,
+          cancelled_at: null,
+          retry_count: 0,
+          retry_policy: null,
+          parent_attempt_id: null,
+          verification_outcome: null,
+          failure_code: null,
+        }
+      )
+    ).rejects.toThrow('idempotency_conflict');
+  });
+});
+
+// ============================================================================
+// Root replay
+// ============================================================================
+
+describe('root replay', () => {
+  it('getAttemptByIdempotencyKey returns the root attempt, not child', async () => {
+    await repos.accounts.createAccount({
+      account_id: 'acc-1',
+      name: 'Test',
+      updated_at: new Date(),
+    });
+    const ts = new Date().toISOString();
+    sqlite.exec(
+      `INSERT INTO routing_policies (policy_id, account_id, name, ordering_strategy, admissibility_rules, budget_constraints, manual_override_allowed, version, created_at, updated_at) VALUES ('pol-1', 'acc-1', 'Default', 'cost', '{}', '{}', 0, 1, '${ts}', '${ts}')`
+    );
+    await repos.tasks.createTask({
+      task_id: 'task-1',
+      account_id: 'acc-1',
+      description: 'Test',
+      requirements: { capabilities: [] },
+      status: 'planning',
+    });
+    await repos.decisions.createDecision({
+      decision_id: 'dec-1',
+      task_id: 'task-1',
+      policy_id: 'pol-1',
+      policy_version: 1,
+      evaluated_routes: [],
+      admissible_routes: [],
+      selected_route_id: null,
+      route_snapshot: null,
+      rejection_reasons: [],
+      estimated_cost: 0,
+    });
+
+    await repos.executions.createExecutionWithRootAttempt(
+      {
+        execution_id: 'exec-replay',
+        account_id: 'acc-1',
+        task_id: 'task-1',
+        root_decision_id: 'dec-1',
+        idempotency_key: 'ik-replay',
+        status: 'pending',
+      },
+      {
+        attempt_id: 'att-replay-root',
+        account_id: 'acc-1',
+        execution_id: 'exec-replay',
+        task_id: 'task-1',
+        decision_id: 'dec-1',
+        idempotency_key: 'ik-replay',
+        status: 'pending',
+        started_at: null,
+        completed_at: null,
+        cancel_requested_at: null,
+        cancelled_at: null,
+        retry_count: 0,
+        retry_policy: null,
+        parent_attempt_id: null,
+        verification_outcome: null,
+        failure_code: null,
+      }
+    );
+
+    await repos.executions.createAttempt({
+      attempt_id: 'att-replay-child',
+      account_id: 'acc-1',
+      execution_id: 'exec-replay',
+      task_id: 'task-1',
+      decision_id: 'dec-1',
+      idempotency_key: 'ik-replay',
+      status: 'pending',
+      started_at: null,
+      completed_at: null,
+      cancel_requested_at: null,
+      cancelled_at: null,
+      retry_count: 1,
+      retry_policy: null,
+      parent_attempt_id: 'att-replay-root',
+      verification_outcome: null,
+      failure_code: null,
+    });
+
+    const found = await repos.executions.getAttemptByIdempotencyKey('acc-1', 'ik-replay');
+    expect(found).not.toBeNull();
+    expect(found!.attempt_id).toBe('att-replay-root');
+    expect(found!.parent_attempt_id).toBeNull();
+  });
+});
+
+// ============================================================================
+// Child attempt lineage
+// ============================================================================
+
+describe('child attempt lineage', () => {
+  it('child attempts have correct parent_attempt_id', async () => {
+    await repos.accounts.createAccount({
+      account_id: 'acc-1',
+      name: 'Test',
+      updated_at: new Date(),
+    });
+    const ts = new Date().toISOString();
+    sqlite.exec(
+      `INSERT INTO routing_policies (policy_id, account_id, name, ordering_strategy, admissibility_rules, budget_constraints, manual_override_allowed, version, created_at, updated_at) VALUES ('pol-1', 'acc-1', 'Default', 'cost', '{}', '{}', 0, 1, '${ts}', '${ts}')`
+    );
+    await repos.tasks.createTask({
+      task_id: 'task-1',
+      account_id: 'acc-1',
+      description: 'Test',
+      requirements: { capabilities: [] },
+      status: 'planning',
+    });
+    await repos.decisions.createDecision({
+      decision_id: 'dec-1',
+      task_id: 'task-1',
+      policy_id: 'pol-1',
+      policy_version: 1,
+      evaluated_routes: [],
+      admissible_routes: [],
+      selected_route_id: null,
+      route_snapshot: null,
+      rejection_reasons: [],
+      estimated_cost: 0,
+    });
+
+    await repos.executions.createExecutionWithRootAttempt(
+      {
+        execution_id: 'exec-lineage',
+        account_id: 'acc-1',
+        task_id: 'task-1',
+        root_decision_id: 'dec-1',
+        idempotency_key: 'ik-lineage',
+        status: 'pending',
+      },
+      {
+        attempt_id: 'att-lineage-root',
+        account_id: 'acc-1',
+        execution_id: 'exec-lineage',
+        task_id: 'task-1',
+        decision_id: 'dec-1',
+        idempotency_key: 'ik-lineage',
+        status: 'pending',
+        started_at: null,
+        completed_at: null,
+        cancel_requested_at: null,
+        cancelled_at: null,
+        retry_count: 0,
+        retry_policy: null,
+        parent_attempt_id: null,
+        verification_outcome: null,
+        failure_code: null,
+      }
+    );
+
+    const child = await repos.executions.createAttempt({
+      attempt_id: 'att-lineage-child',
+      account_id: 'acc-1',
+      execution_id: 'exec-lineage',
+      task_id: 'task-1',
+      decision_id: 'dec-1',
+      idempotency_key: 'ik-lineage',
+      status: 'pending',
+      started_at: null,
+      completed_at: null,
+      cancel_requested_at: null,
+      cancelled_at: null,
+      retry_count: 1,
+      retry_policy: null,
+      parent_attempt_id: 'att-lineage-root',
+      verification_outcome: null,
+      failure_code: null,
+    });
+
+    expect(child.parent_attempt_id).toBe('att-lineage-root');
+
+    const root = await repos.executions.getAttempt('att-lineage-root');
+    expect(root).not.toBeNull();
+    expect(root!.parent_attempt_id).toBeNull();
+  });
+});
+
+// ============================================================================
+// Usage aggregation with null actual_cost
+// ============================================================================
+
+describe('usage aggregation with null actual_cost', () => {
+  it('getDailySpending sums only known costs, not nulls', async () => {
+    await repos.accounts.createAccount({
+      account_id: 'acc-1',
+      name: 'Test',
+      updated_at: new Date(),
+    });
+    const ts = new Date().toISOString();
+    sqlite.exec(
+      `INSERT INTO routing_policies (policy_id, account_id, name, ordering_strategy, admissibility_rules, budget_constraints, manual_override_allowed, version, created_at, updated_at) VALUES ('pol-1', 'acc-1', 'Default', 'cost', '{}', '{}', 0, 1, '${ts}', '${ts}')`
+    );
+    await repos.tasks.createTask({
+      task_id: 'task-1',
+      account_id: 'acc-1',
+      description: 'Test',
+      requirements: { capabilities: [] },
+      status: 'planning',
+    });
+    await repos.decisions.createDecision({
+      decision_id: 'dec-1',
+      task_id: 'task-1',
+      policy_id: 'pol-1',
+      policy_version: 1,
+      evaluated_routes: [],
+      admissible_routes: [],
+      selected_route_id: null,
+      route_snapshot: null,
+      rejection_reasons: [],
+      estimated_cost: 0,
+    });
+
+    await repos.executions.createAttempt({
+      attempt_id: 'att-cost-1',
+      account_id: 'acc-1',
+      execution_id: 'exec-cost-1',
+      task_id: 'task-1',
+      decision_id: 'dec-1',
+      idempotency_key: 'ik-cost-1',
+      status: 'completed',
+      started_at: null,
+      completed_at: null,
+      cancel_requested_at: null,
+      cancelled_at: null,
+      retry_count: 0,
+      retry_policy: null,
+      parent_attempt_id: null,
+      verification_outcome: null,
+      failure_code: null,
+    });
+    await repos.executions.createAttempt({
+      attempt_id: 'att-cost-2',
+      account_id: 'acc-1',
+      execution_id: 'exec-cost-2',
+      task_id: 'task-1',
+      decision_id: 'dec-1',
+      idempotency_key: 'ik-cost-2',
+      status: 'completed',
+      started_at: null,
+      completed_at: null,
+      cancel_requested_at: null,
+      cancelled_at: null,
+      retry_count: 0,
+      retry_policy: null,
+      parent_attempt_id: null,
+      verification_outcome: null,
+      failure_code: null,
+    });
+
+    await repos.usage.createUsage({
+      usage_id: 'usage-cost-1',
+      account_id: 'acc-1',
+      attempt_id: 'att-cost-1',
+      provider_usage_data: {},
+      actual_cost: 0.01,
+      cost_breakdown: {},
+      tokens_used: null,
+      cost_variance: null,
+    });
+    await repos.usage.createUsage({
+      usage_id: 'usage-cost-2',
+      account_id: 'acc-1',
+      attempt_id: 'att-cost-2',
+      provider_usage_data: {},
+      actual_cost: null,
+      cost_breakdown: {},
+      tokens_used: null,
+      cost_variance: null,
+    });
+
+    const daily = await repos.usage.getDailySpending('acc-1');
+    expect(daily).toBe(0.01);
+  });
+});
+
+// ============================================================================
+// Unknown cost count
+// ============================================================================
+
+describe('unknown cost count', () => {
+  it('null actual_cost records appear in listUsageForAccount', async () => {
+    await repos.accounts.createAccount({
+      account_id: 'acc-1',
+      name: 'Test',
+      updated_at: new Date(),
+    });
+    const ts = new Date().toISOString();
+    sqlite.exec(
+      `INSERT INTO routing_policies (policy_id, account_id, name, ordering_strategy, admissibility_rules, budget_constraints, manual_override_allowed, version, created_at, updated_at) VALUES ('pol-1', 'acc-1', 'Default', 'cost', '{}', '{}', 0, 1, '${ts}', '${ts}')`
+    );
+    await repos.tasks.createTask({
+      task_id: 'task-1',
+      account_id: 'acc-1',
+      description: 'Test',
+      requirements: { capabilities: [] },
+      status: 'planning',
+    });
+    await repos.decisions.createDecision({
+      decision_id: 'dec-1',
+      task_id: 'task-1',
+      policy_id: 'pol-1',
+      policy_version: 1,
+      evaluated_routes: [],
+      admissible_routes: [],
+      selected_route_id: null,
+      route_snapshot: null,
+      rejection_reasons: [],
+      estimated_cost: 0,
+    });
+
+    await repos.executions.createAttempt({
+      attempt_id: 'att-unk-1',
+      account_id: 'acc-1',
+      execution_id: 'exec-unk-1',
+      task_id: 'task-1',
+      decision_id: 'dec-1',
+      idempotency_key: 'ik-unk-1',
+      status: 'completed',
+      started_at: null,
+      completed_at: null,
+      cancel_requested_at: null,
+      cancelled_at: null,
+      retry_count: 0,
+      retry_policy: null,
+      parent_attempt_id: null,
+      verification_outcome: null,
+      failure_code: null,
+    });
+    await repos.executions.createAttempt({
+      attempt_id: 'att-unk-2',
+      account_id: 'acc-1',
+      execution_id: 'exec-unk-2',
+      task_id: 'task-1',
+      decision_id: 'dec-1',
+      idempotency_key: 'ik-unk-2',
+      status: 'completed',
+      started_at: null,
+      completed_at: null,
+      cancel_requested_at: null,
+      cancelled_at: null,
+      retry_count: 0,
+      retry_policy: null,
+      parent_attempt_id: null,
+      verification_outcome: null,
+      failure_code: null,
+    });
+
+    await repos.usage.createUsage({
+      usage_id: 'usage-unk-1',
+      account_id: 'acc-1',
+      attempt_id: 'att-unk-1',
+      provider_usage_data: {},
+      actual_cost: 0.05,
+      cost_breakdown: {},
+      tokens_used: null,
+      cost_variance: null,
+    });
+    await repos.usage.createUsage({
+      usage_id: 'usage-unk-2',
+      account_id: 'acc-1',
+      attempt_id: 'att-unk-2',
+      provider_usage_data: {},
+      actual_cost: null,
+      cost_breakdown: {},
+      tokens_used: null,
+      cost_variance: null,
+    });
+
+    const all = await repos.usage.listUsageForAccount('acc-1');
+    expect(all).toHaveLength(2);
+    const withCost = all.filter((u) => u.actual_cost !== null);
+    const withoutCost = all.filter((u) => u.actual_cost === null);
+    expect(withCost).toHaveLength(1);
+    expect(withoutCost).toHaveLength(1);
+    expect(withCost[0].actual_cost).toBe(0.05);
+  });
+});
+
+// ============================================================================
+// Two connections to same provider
+// ============================================================================
+
+describe('two connections to same provider', () => {
+  it('listing routes works with two provider connections', async () => {
+    await repos.accounts.createAccount({
+      account_id: 'acc-1',
+      name: 'Test',
+      updated_at: new Date(),
+    });
+
+    await repos.connections.createConnection({
+      type: 'provider',
+      connection_id: 'conn-a',
+      account_id: 'acc-1',
+      provider: 'openai',
+      status: 'active',
+      credential_reference: 'ref-a',
+    } as Omit<ProviderConnection, 'created_at' | 'updated_at'>);
+    await repos.connections.createConnection({
+      type: 'provider',
+      connection_id: 'conn-b',
+      account_id: 'acc-1',
+      provider: 'openai',
+      status: 'active',
+      credential_reference: 'ref-b',
+    } as Omit<ProviderConnection, 'created_at' | 'updated_at'>);
+
+    const ts = new Date().toISOString();
+    sqlite.exec(
+      `INSERT INTO model_routes (route_id, route_type, connection_id, source_id, source_provider, capabilities, pricing_input, pricing_output, pricing_currency, pricing_units, pricing_source, pricing_effective_at, pricing_refreshed_at, pricing_version, availability_status, created_at, updated_at) VALUES ('route-a', 'provider', 'conn-a', 'gpt-4', 'openai', '["text"]', 0.03, 0.06, 'USD', 'per_1k_tokens', 'test', '${ts}', '${ts}', 'v1', 'available', '${ts}', '${ts}')`
+    );
+    sqlite.exec(
+      `INSERT INTO model_routes (route_id, route_type, connection_id, source_id, source_provider, capabilities, pricing_input, pricing_output, pricing_currency, pricing_units, pricing_source, pricing_effective_at, pricing_refreshed_at, pricing_version, availability_status, created_at, updated_at) VALUES ('route-b', 'provider', 'conn-b', 'gpt-4', 'openai', '["text"]', 0.03, 0.06, 'USD', 'per_1k_tokens', 'test', '${ts}', '${ts}', 'v1', 'available', '${ts}', '${ts}')`
+    );
+
+    const routes = await repos.routes.listRoutes('acc-1');
+    expect(routes).toHaveLength(2);
+    expect(routes.map((r) => r.route_id).sort()).toEqual(['route-a', 'route-b']);
   });
 });

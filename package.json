@@ -32,8 +32,9 @@
     "npm": ">=10.0.0"
   },
   "allowScripts": {
-    "prisma@5.22.0": true,
-    "@prisma/client@5.22.0": true,
+    "prisma@7.9.1": true,
+    "@prisma/client@7.9.1": true,
+    "@prisma/adapter-pg@7.9.1": true,
     "better-sqlite3@13.0.3": true,
     "esbuild@0.25.12": true
   },

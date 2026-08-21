@@ -11,6 +11,7 @@ import type {
   ModelRoute,
   RoutingPolicy,
   Task,
+  Execution,
   RoutingDecision,
   ExecutionAttempt,
   UsageRecord,
@@ -94,6 +95,22 @@ export interface DecisionRepository {
 }
 
 export interface ExecutionRepository {
+  /** Durable root execution identity. Optional for legacy in-memory adapters. */
+  getExecution?(execution_id: string): Promise<Execution | null>;
+  getExecutionByIdempotencyKey?(
+    account_id: string,
+    idempotency_key: string
+  ): Promise<Execution | null>;
+  createExecution?(execution: Omit<Execution, 'created_at'>): Promise<Execution>;
+  createExecutionWithRootAttempt?(
+    execution: Omit<Execution, 'created_at'>,
+    attempt: Omit<ExecutionAttempt, 'created_at'>
+  ): Promise<{ execution: Execution; attempt: ExecutionAttempt }>;
+  updateExecutionStatus?(
+    execution_id: string,
+    status: Execution['status'],
+    expected_status?: Execution['status']
+  ): Promise<void>;
   getAttempt(attempt_id: string): Promise<ExecutionAttempt | null>;
   getAttemptByIdempotencyKey(
     account_id: string,

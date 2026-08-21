@@ -216,6 +216,7 @@ model Execution {
   task_id          String
   root_decision_id String
   idempotency_key  String
+  command_fingerprint String?
   status           String // ExecutionStatus
   created_at       DateTime @default(now())
 

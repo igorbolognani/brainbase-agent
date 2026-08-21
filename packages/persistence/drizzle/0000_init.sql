@@ -126,6 +126,23 @@ CREATE INDEX IF NOT EXISTS "decisions_task" ON "routing_decisions"("task_id");
 CREATE INDEX IF NOT EXISTS "decisions_policy" ON "routing_decisions"("policy_id");
 CREATE INDEX IF NOT EXISTS "decisions_decided_at" ON "routing_decisions"("decided_at");
 
+CREATE TABLE IF NOT EXISTS "executions" (
+  "execution_id" TEXT PRIMARY KEY,
+  "account_id" TEXT NOT NULL REFERENCES "accounts"("account_id"),
+  "task_id" TEXT NOT NULL REFERENCES "tasks"("task_id"),
+  "root_decision_id" TEXT NOT NULL REFERENCES "routing_decisions"("decision_id"),
+  "idempotency_key" TEXT NOT NULL,
+  "command_fingerprint" TEXT,
+  "status" TEXT NOT NULL,
+  "created_at" TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS "executions_account_idempotency"
+  ON "executions"("account_id", "idempotency_key");
+CREATE INDEX IF NOT EXISTS "executions_account" ON "executions"("account_id");
+CREATE INDEX IF NOT EXISTS "executions_task" ON "executions"("task_id");
+CREATE INDEX IF NOT EXISTS "executions_status" ON "executions"("status");
+
 CREATE TABLE IF NOT EXISTS "execution_attempts" (
   "attempt_id" TEXT PRIMARY KEY,
   "account_id" TEXT NOT NULL REFERENCES "accounts"("account_id"),
@@ -146,7 +163,6 @@ CREATE TABLE IF NOT EXISTS "execution_attempts" (
   "created_at" TEXT NOT NULL
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS "attempts_idempotency" ON "execution_attempts"("account_id", "idempotency_key");
 CREATE INDEX IF NOT EXISTS "attempts_execution" ON "execution_attempts"("execution_id");
 CREATE INDEX IF NOT EXISTS "attempts_task" ON "execution_attempts"("task_id");
 CREATE INDEX IF NOT EXISTS "attempts_decision" ON "execution_attempts"("decision_id");
