@@ -15,6 +15,8 @@ export interface ProviderExecutionRequest {
   route_type: 'provider' | 'gateway';
   gateway_url?: string;
   task_input: Record<string, unknown>;
+  /** Server-side resolved credential. NEVER exposed to MCP/UI/logs. */
+  _credential?: string;
 }
 
 export type ProviderErrorClassification =
