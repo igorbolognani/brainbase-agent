@@ -13,4 +13,6 @@ export * from './provider-health.js';
 export * from './model-catalog.js';
 export * from './benchmark-ingester.js';
 export * from './connection-health.js';
+export * from './orchestration-graph.js';
+export * from './orchestration-orchestrator.js';
 export * from './utils.js';
