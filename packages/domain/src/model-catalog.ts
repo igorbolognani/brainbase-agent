@@ -6,11 +6,7 @@
  * Provider + model identity matters. A marketing model name is NOT globally unique.
  */
 
-import type {
-  ModelMetadata,
-  AvailabilityStatus,
-  PricingInfo,
-} from '@gptrouter/contracts';
+import type { ModelMetadata, AvailabilityStatus, PricingInfo } from '@gptrouter/contracts';
 
 export interface ModelOffering {
   offering_id: string;

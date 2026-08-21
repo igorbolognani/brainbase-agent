@@ -18,7 +18,7 @@ export type TaskStatus =
 export type ExecutionStatus =
   'pending' | 'running' | 'completed' | 'failed' | 'cancel_requested' | 'cancelled';
 export type VerificationOutcome = 'accepted' | 'retryable_failure' | 'terminal_failure';
-export type OrderingStrategy = 'cost' | 'quality' | 'latency' | 'custom';
+export type OrderingStrategy = 'cost' | 'quality' | 'latency' | 'balanced' | 'custom';
 export type OrderingStatus = 'operational' | 'unsupported';
 
 /**
@@ -346,14 +346,14 @@ export interface UsageRecord {
   account_id: string;
   attempt_id: string;
   provider_usage_data: Record<string, unknown>;
-  actual_cost: number;
+  actual_cost: number | null; // null = unknown; 0 = known zero
   cost_breakdown: Record<string, unknown>;
   tokens_used: {
     input: number;
     output: number;
   } | null;
   reconciled_at: Date;
-  cost_variance: number | null; // actual - estimated
+  cost_variance: number | null; // actual - estimated; null when unknown
 }
 
 // ============================================================================

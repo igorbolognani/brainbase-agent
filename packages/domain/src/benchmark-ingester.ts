@@ -80,10 +80,17 @@ export class BenchmarkIngester {
     if (typeof entry.score !== 'number' || !isFinite(entry.score)) {
       return { valid: false, error: 'missing or invalid score' };
     }
-    if (entry.score < BenchmarkIngester.VALID_SCORE_RANGE.min || entry.score > BenchmarkIngester.VALID_SCORE_RANGE.max) {
+    if (
+      entry.score < BenchmarkIngester.VALID_SCORE_RANGE.min ||
+      entry.score > BenchmarkIngester.VALID_SCORE_RANGE.max
+    ) {
       return { valid: false, error: `score ${entry.score} outside valid range [0, 1]` };
     }
-    if (typeof entry.sample_size !== 'number' || entry.sample_size < 0 || !Number.isInteger(entry.sample_size)) {
+    if (
+      typeof entry.sample_size !== 'number' ||
+      entry.sample_size < 0 ||
+      !Number.isInteger(entry.sample_size)
+    ) {
       return { valid: false, error: 'sample_size must be a non-negative integer' };
     }
     if (!entry.source || typeof entry.source !== 'string') {
@@ -92,7 +99,10 @@ export class BenchmarkIngester {
     if (typeof entry.confidence !== 'number' || !isFinite(entry.confidence)) {
       return { valid: false, error: 'missing or invalid confidence' };
     }
-    if (entry.confidence < BenchmarkIngester.VALID_CONFIDENCE_RANGE.min || entry.confidence > BenchmarkIngester.VALID_CONFIDENCE_RANGE.max) {
+    if (
+      entry.confidence < BenchmarkIngester.VALID_CONFIDENCE_RANGE.min ||
+      entry.confidence > BenchmarkIngester.VALID_CONFIDENCE_RANGE.max
+    ) {
       return { valid: false, error: `confidence ${entry.confidence} outside valid range [0, 1]` };
     }
     if (!entry.version || typeof entry.version !== 'string') {

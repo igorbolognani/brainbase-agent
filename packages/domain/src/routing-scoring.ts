@@ -39,8 +39,10 @@ export class EvidenceBasedRouter {
   constructor(options: EvidenceBasedRoutingOptions = {}) {
     this.quality_weight = options.quality_weight ?? DEFAULTS.quality_weight;
     this.cost_weight = options.cost_weight ?? DEFAULTS.cost_weight;
-    this.health_degraded_penalty = options.health_degraded_penalty ?? DEFAULTS.health_degraded_penalty;
-    this.health_unavailable_penalty = options.health_unavailable_penalty ?? DEFAULTS.health_unavailable_penalty;
+    this.health_degraded_penalty =
+      options.health_degraded_penalty ?? DEFAULTS.health_degraded_penalty;
+    this.health_unavailable_penalty =
+      options.health_unavailable_penalty ?? DEFAULTS.health_unavailable_penalty;
   }
 
   /**
@@ -75,11 +77,13 @@ export class EvidenceBasedRouter {
   ): RoutingScore[] {
     if (routes.length === 0) return [];
 
-    const maxCost = Math.max(...routes.map((r) => r.pricing.input_cost_per_1k_tokens + r.pricing.output_cost_per_1k_tokens));
+    const maxCost = Math.max(
+      ...routes.map((r) => r.pricing.input_cost_per_1k_tokens + r.pricing.output_cost_per_1k_tokens)
+    );
 
     return routes.map((route) => {
       const cost = route.pricing.input_cost_per_1k_tokens + route.pricing.output_cost_per_1k_tokens;
-      const costScore = maxCost > 0 ? 1 - (cost / maxCost) : 1;
+      const costScore = maxCost > 0 ? 1 - cost / maxCost : 1;
       const healthState = healthStates.get(route.connection_id) ?? 'healthy';
       const healthPenalty = this.getHealthPenalty(healthState);
       const reasons: string[] = [];
@@ -146,9 +150,7 @@ export class EvidenceBasedRouter {
       const healthPenalty = this.getHealthPenalty(healthState);
 
       const totalScore =
-        (costScore * this.cost_weight) +
-        (qualityScore * this.quality_weight) -
-        healthPenalty;
+        costScore * this.cost_weight + qualityScore * this.quality_weight - healthPenalty;
 
       const reasons: string[] = [];
       if (!qualityScores.has(route.route_id)) reasons.push('missing_quality_evidence');
@@ -167,9 +169,12 @@ export class EvidenceBasedRouter {
 
   private getHealthPenalty(state: 'healthy' | 'degraded' | 'unavailable'): number {
     switch (state) {
-      case 'healthy': return 0;
-      case 'degraded': return this.health_degraded_penalty;
-      case 'unavailable': return this.health_unavailable_penalty;
+      case 'healthy':
+        return 0;
+      case 'degraded':
+        return this.health_degraded_penalty;
+      case 'unavailable':
+        return this.health_unavailable_penalty;
     }
   }
 }

@@ -7,6 +7,24 @@ import type {
   ExecutionVerifier,
 } from './execution-coordinator.js';
 
+export type ProviderErrorClassification =
+  | 'rate_limited'
+  | 'timeout'
+  | 'provider_unavailable'
+  | 'invalid_request'
+  | 'authentication_failed'
+  | 'authorization_failed'
+  | 'context_limit'
+  | 'insufficient_balance'
+  | 'cancelled'
+  | 'credential_missing'
+  | 'credential_revoked'
+  | 'unknown_provider_error';
+
+export interface CredentialResolver {
+  resolveCredential(connection_id: string): Promise<string>;
+}
+
 export interface ProviderExecutionRequest {
   connection_id: string; // Opaque reference ONLY
   provider: string; // e.g. 'openai', 'anthropic', 'google', 'openrouter', '9router'
@@ -15,19 +33,7 @@ export interface ProviderExecutionRequest {
   route_type: 'provider' | 'gateway';
   gateway_url?: string;
   task_input: Record<string, unknown>;
-  /** Server-side resolved credential. NEVER exposed to MCP/UI/logs. */
-  _credential?: string;
 }
-
-export type ProviderErrorClassification =
-  | 'rate_limited'
-  | 'timeout'
-  | 'provider_unavailable'
-  | 'invalid_request'
-  | 'authentication_failed'
-  | 'authorization_failed'
-  | 'cancelled'
-  | 'unknown_provider_error';
 
 export interface ProviderExecutionResult {
   success: boolean;
@@ -44,7 +50,7 @@ export interface ProviderExecutionResult {
     input: number;
     output: number;
   } | null;
-  actual_cost: number;
+  actual_cost: number | null; // null = unknown cost; 0 = known zero cost
   cost_breakdown: Record<string, unknown>;
 }
 
@@ -96,7 +102,12 @@ export class FakeProviderAdapter implements ProviderAdapter {
     const outcome = this.options.outcome ?? 'success';
 
     // Verify credential or raw secrets are NOT present
-    if ('api_key' in request || 'secret' in request || 'access_token' in request) {
+    if (
+      'api_key' in request ||
+      'secret' in request ||
+      'access_token' in request ||
+      '_credential' in request
+    ) {
       throw new Error('SECURITY_VIOLATION: Raw credential passed in execution request');
     }
 
@@ -194,6 +205,7 @@ export class DefaultProviderAdapterRegistry implements ProviderAdapterRegistry {
 
 export interface AdapterExecutionCoordinatorBridgeOptions {
   registry: ProviderAdapterRegistry;
+  credentialResolver: CredentialResolver;
 }
 
 export class AdapterExecutionCoordinatorBridge implements ExecutionExecutor {
@@ -209,14 +221,13 @@ export class AdapterExecutionCoordinatorBridge implements ExecutionExecutor {
     const adapter = this.options.registry.getAdapter(provider, snapshot.route_type);
 
     if (!adapter) {
-      // Unknown adapter fails closed with a retryable or terminal error represented in result
       return {
         provider_usage_data: {
-          execution_mode: 'fake_adapter',
+          execution_mode: 'adapter_bridge',
           error: 'unknown_adapter',
           provider,
         },
-        actual_cost: 0,
+        actual_cost: null,
         cost_breakdown: { error: 'unknown_adapter' },
         tokens_used: null,
       };
@@ -236,7 +247,7 @@ export class AdapterExecutionCoordinatorBridge implements ExecutionExecutor {
     if (!result.success) {
       return {
         provider_usage_data: {
-          execution_mode: 'fake_adapter',
+          execution_mode: 'adapter_bridge',
           success: false,
           error_classification: result.error_classification ?? 'unknown_provider_error',
           error_message: result.error_message,
@@ -254,7 +265,7 @@ export class AdapterExecutionCoordinatorBridge implements ExecutionExecutor {
 
     return {
       provider_usage_data: {
-        execution_mode: 'fake_adapter',
+        execution_mode: 'adapter_bridge',
         success: true,
         output: result.output,
         provider: result.provider,
@@ -283,7 +294,10 @@ export class AdapterExecutionCoordinatorBridge implements ExecutionExecutor {
 export class AdapterExecutionVerifier implements ExecutionVerifier {
   async verify(output: ExecutionOutput, _input: ExecutionInput) {
     const data = output.provider_usage_data;
-    if (data && data.execution_mode === 'fake_adapter') {
+    if (
+      data &&
+      (data.execution_mode === 'adapter_bridge' || data.execution_mode === 'fake_adapter')
+    ) {
       if (data.error === 'unknown_adapter') {
         return {
           outcome: 'terminal_failure' as const,

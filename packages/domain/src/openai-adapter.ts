@@ -12,6 +12,7 @@ import type {
   ProviderExecutionRequest,
   ProviderExecutionResult,
   ProviderErrorClassification,
+  CredentialResolver,
 } from './provider-adapter.js';
 import type { ExecutionCancellationResult } from './execution-coordinator.js';
 
@@ -20,9 +21,13 @@ export interface OpenAICompatibleAdapterOptions {
   baseUrl: string; // Trusted server-side configured endpoint
   fetch?: typeof globalThis.fetch;
   timeout_ms?: number;
+  credentialResolver: CredentialResolver;
 }
 
-function classifyOpenAIError(status: number, body: Record<string, unknown>): {
+function classifyOpenAIError(
+  status: number,
+  body: Record<string, unknown>
+): {
   classification: ProviderErrorClassification;
   retryable: boolean;
 } {
@@ -40,14 +45,20 @@ function classifyOpenAIError(status: number, body: Record<string, unknown>): {
   }
   if (status === 401 || status === 403) {
     const isAuth = status === 401;
-    return { classification: isAuth ? 'authentication_failed' : 'authorization_failed', retryable: false };
+    return {
+      classification: isAuth ? 'authentication_failed' : 'authorization_failed',
+      retryable: false,
+    };
   }
   if (status === 400) {
     const msgLower = message.toLowerCase();
     if (msgLower.includes('context') || msgLower.includes('token') || msgLower.includes('length')) {
-      return { classification: 'invalid_request', retryable: false };
+      return { classification: 'context_limit', retryable: false };
     }
     return { classification: 'invalid_request', retryable: false };
+  }
+  if (status === 402) {
+    return { classification: 'insufficient_balance', retryable: false };
   }
   return { classification: 'unknown_provider_error', retryable: false };
 }
@@ -57,17 +68,38 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
   private readonly baseUrl: string;
   private readonly fetchFn: typeof globalThis.fetch;
   private readonly timeout_ms: number;
+  private readonly credentialResolver: CredentialResolver;
 
   constructor(options: OpenAICompatibleAdapterOptions) {
     this.provider = options.provider;
     this.baseUrl = options.baseUrl.replace(/\/+$/, '');
     this.fetchFn = options.fetch ?? globalThis.fetch;
     this.timeout_ms = options.timeout_ms ?? 60_000;
+    this.credentialResolver = options.credentialResolver;
   }
 
   async execute(request: ProviderExecutionRequest): Promise<ProviderExecutionResult> {
-    const url = `${this.baseUrl}/v1/chat/completions`;
+    let credential: string;
+    try {
+      credential = await this.credentialResolver.resolveCredential(request.connection_id);
+    } catch {
+      return {
+        success: false,
+        output: null,
+        provider: this.provider,
+        source_id: request.source_id,
+        route_id: request.route_id,
+        connection_id: request.connection_id,
+        error_classification: 'credential_missing',
+        error_message: 'Could not resolve credential',
+        is_retryable: false,
+        tokens_used: null,
+        actual_cost: null,
+        cost_breakdown: { error: 'credential_missing' },
+      };
+    }
 
+    const url = `${this.baseUrl}/v1/chat/completions`;
     const messages = buildMessages(request.task_input);
 
     const body = {
@@ -85,7 +117,7 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${request._credential}`,
+          Authorization: `Bearer ${credential}`,
         },
         body: JSON.stringify(body),
         signal: controller.signal,
@@ -105,7 +137,7 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
           error_message: 'Request timed out',
           is_retryable: true,
           tokens_used: null,
-          actual_cost: 0,
+          actual_cost: null,
           cost_breakdown: { error: 'timeout' },
         };
       }
@@ -120,7 +152,7 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
         error_message: `Network error: ${error instanceof Error ? error.message : 'unknown'}`,
         is_retryable: true,
         tokens_used: null,
-        actual_cost: 0,
+        actual_cost: null,
         cost_breakdown: { error: 'network' },
       };
     } finally {
@@ -132,7 +164,8 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
     if (!response.ok) {
       const { classification, retryable } = classifyOpenAIError(response.status, responseBody);
       const errorObj = responseBody.error as Record<string, unknown> | undefined;
-      const message = typeof errorObj?.message === 'string' ? errorObj.message : `HTTP ${response.status}`;
+      const message =
+        typeof errorObj?.message === 'string' ? errorObj.message : `HTTP ${response.status}`;
 
       return {
         success: false,
@@ -146,7 +179,7 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
         error_message: message,
         is_retryable: retryable,
         tokens_used: extractUsage(responseBody),
-        actual_cost: 0,
+        actual_cost: null,
         cost_breakdown: { error: classification },
       };
     }
@@ -154,10 +187,17 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
     const outputText = extractContent(responseBody);
     const usage = extractUsage(responseBody);
     const cost = estimateCost(request.source_id, usage);
+    const finishReason = extractFinishReason(responseBody);
+
+    // Normalized, bounded output — no raw response blob
+    const output: Record<string, unknown> = { content: outputText };
+    if (finishReason) output.finish_reason = finishReason;
+    const toolCalls = extractToolCalls(responseBody);
+    if (toolCalls) output.tool_calls = toolCalls;
 
     return {
       success: true,
-      output: { content: outputText, raw: responseBody },
+      output,
       provider: this.provider,
       source_id: request.source_id,
       route_id: request.route_id,
@@ -165,19 +205,29 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
       provider_request_id: response.headers.get('x-request-id') ?? undefined,
       is_retryable: false,
       tokens_used: usage,
-      actual_cost: cost.total,
-      cost_breakdown: cost,
+      actual_cost: cost.known ? cost.total : null,
+      cost_breakdown: cost.known
+        ? {
+            provider: this.provider,
+            input_cost: cost.input,
+            output_cost: cost.output,
+            cost_known: true,
+          }
+        : { provider: this.provider, cost_known: false },
     };
   }
 
-  async cancel(connection_id: string, provider_request_id: string): Promise<ExecutionCancellationResult> {
-    void connection_id;
-    void provider_request_id;
+  async cancel(
+    _connection_id: string,
+    _provider_request_id: string
+  ): Promise<ExecutionCancellationResult> {
     return 'not_supported';
   }
 }
 
-function buildMessages(taskInput: Record<string, unknown>): Array<{ role: string; content: string }> {
+function buildMessages(
+  taskInput: Record<string, unknown>
+): Array<{ role: string; content: string }> {
   const messages: Array<{ role: string; content: string }> = [];
 
   const systemPrompt = taskInput.system_prompt ?? taskInput.system;
@@ -205,6 +255,27 @@ function extractContent(body: Record<string, unknown>): string {
   return typeof message?.content === 'string' ? message.content : '';
 }
 
+function extractFinishReason(body: Record<string, unknown>): string | null {
+  const choices = body.choices as Array<Record<string, unknown>> | undefined;
+  if (!choices || choices.length === 0) return null;
+  const reason = choices[0]?.finish_reason;
+  return typeof reason === 'string' ? reason : null;
+}
+
+function extractToolCalls(body: Record<string, unknown>): Array<Record<string, unknown>> | null {
+  const choices = body.choices as Array<Record<string, unknown>> | undefined;
+  if (!choices || choices.length === 0) return null;
+  const message = choices[0]?.message as Record<string, unknown> | undefined;
+  const toolCalls = message?.tool_calls;
+  if (!Array.isArray(toolCalls) || toolCalls.length === 0) return null;
+  // Normalize to bounded structure
+  return toolCalls.map((tc: Record<string, unknown>) => ({
+    id: tc.id,
+    type: tc.type,
+    function: tc.function,
+  }));
+}
+
 function extractUsage(body: Record<string, unknown>): { input: number; output: number } | null {
   const usage = body.usage as Record<string, unknown> | undefined;
   if (!usage) return null;
@@ -216,22 +287,23 @@ function extractUsage(body: Record<string, unknown>): { input: number; output: n
 function estimateCost(
   model: string,
   usage: { input: number; output: number } | null
-): { total: number; input: number; output: number } {
-  if (!usage) return { total: 0, input: 0, output: 0 };
+): { total: number; input: number; output: number; known: boolean } {
+  if (!usage) return { total: 0, input: 0, output: 0, known: false };
 
-  // Cost estimation is version-aware and model-specific.
-  // In production this would come from a pricing catalog.
-  // For safety: unknown models return zero cost (unknown, not fake zero).
-  const inputPer1k = MODEL_PRICING[model]?.input ?? 0;
-  const outputPer1k = MODEL_PRICING[model]?.output ?? 0;
+  const pricing = MODEL_PRICING[model];
+  if (!pricing) {
+    // Unknown model: cost is unknown, NOT zero
+    return { total: 0, input: 0, output: 0, known: false };
+  }
 
-  const inputCost = (usage.input / 1000) * inputPer1k;
-  const outputCost = (usage.output / 1000) * outputPer1k;
+  const inputCost = (usage.input / 1000) * pricing.input;
+  const outputCost = (usage.output / 1000) * pricing.output;
 
   return {
     total: inputCost + outputCost,
     input: inputCost,
     output: outputCost,
+    known: true,
   };
 }
 
@@ -239,7 +311,12 @@ function estimateCost(
 // NOT hardcoded as canonical truth — this is a reference snapshot.
 const MODEL_PRICING: Record<string, { input: number; output: number; source?: string }> = {};
 
-export function registerModelPricing(model: string, input: number, output: number, source?: string): void {
+export function registerModelPricing(
+  model: string,
+  input: number,
+  output: number,
+  source?: string
+): void {
   MODEL_PRICING[model] = { input, output, source };
 }
 

@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, beforeAll } from 'vitest';
 import { createTestDatabase, initializeSchema, type DrizzleDB } from '../database.js';
 import { createDatabaseRepositories, type DatabaseRepositories } from '../repositories.js';
 import { FakeSecretStore, EnvSecretStore } from '../credential-store.js';
 import { AuthVerifier, AuthError, FakeAuthVerifier } from '../auth-verifier.js';
+import * as jose from 'jose';
 import type { ProviderConnection, GatewayConnection } from '@gptrouter/contracts';
 
 let db: DrizzleDB;
@@ -806,25 +807,46 @@ describe('EnvSecretStore', () => {
 });
 
 // ============================================================================
-// Auth Verifier
+// Auth Verifier — jose-based cryptographic verification
 // ============================================================================
 
 describe('AuthVerifier', () => {
-  const validHeader = Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT' })).toString(
-    'base64url'
-  );
+  // Generate an RSA key pair for testing
+  // Private key type is CryptoKey but not in scope without DOM lib
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let privateKey: any;
+  let publicKeyJwk: jose.JWK;
 
-  function makeToken(payload: Record<string, unknown>): string {
-    return `${validHeader}.${Buffer.from(JSON.stringify(payload)).toString('base64url')}.sig`;
+  beforeAll(async () => {
+    const pair = await jose.generateKeyPair('RS256');
+    privateKey = pair.privateKey;
+    publicKeyJwk = await jose.exportJWK(pair.publicKey);
+    publicKeyJwk.alg = 'RS256';
+    publicKeyJwk.use = 'sig';
+    publicKeyJwk.kid = 'test-key-1';
+  });
+
+  function makeJwksResolver() {
+    return async (_issuer: string) => [publicKeyJwk];
+  }
+
+  async function signToken(
+    payload: Record<string, unknown>,
+    header: Record<string, unknown> = {}
+  ): Promise<string> {
+    const jwt = await new jose.SignJWT(payload as jose.JWTPayload)
+      .setProtectedHeader({ alg: 'RS256', kid: 'test-key-1', ...header })
+      .sign(privateKey as jose.KeyInput);
+    return jwt;
   }
 
   it('rejects empty tokens', async () => {
-    const verifier = new AuthVerifier();
+    const verifier = new AuthVerifier({ jwksResolver: makeJwksResolver() });
     await expect(verifier.verify('')).rejects.toThrow(AuthError);
   });
 
   it('rejects malformed tokens', async () => {
-    const verifier = new AuthVerifier();
+    const verifier = new AuthVerifier({ jwksResolver: makeJwksResolver() });
     try {
       await verifier.verify('not-a-jwt');
       expect.unreachable();
@@ -836,13 +858,12 @@ describe('AuthVerifier', () => {
 
   it('rejects expired tokens', async () => {
     const clock = () => new Date('2025-01-02T00:00:00Z');
-    const verifier = new AuthVerifier({ clock });
-    const token = makeToken({
-      alg: 'RS256',
+    const verifier = new AuthVerifier({ clock, jwksResolver: makeJwksResolver() });
+    const token = await signToken({
       iss: 'test',
       sub: 'user1',
-      exp: 1735689600,
-      iat: 1735686000,
+      exp: Math.floor(new Date('2025-01-01T00:00:00Z').getTime() / 1000),
+      iat: Math.floor(new Date('2024-12-31T00:00:00Z').getTime() / 1000),
     });
     try {
       await verifier.verify(token);
@@ -855,13 +876,16 @@ describe('AuthVerifier', () => {
 
   it('rejects wrong issuer', async () => {
     const clock = () => new Date('2025-01-01T00:00:00Z');
-    const verifier = new AuthVerifier({ clock, expectedIssuer: 'expected-issuer' });
-    const token = makeToken({
-      alg: 'RS256',
+    const verifier = new AuthVerifier({
+      clock,
+      expectedIssuer: 'expected-issuer',
+      jwksResolver: makeJwksResolver(),
+    });
+    const token = await signToken({
       iss: 'wrong-issuer',
       sub: 'user1',
       exp: 9999999999,
-      iat: 1735686000,
+      iat: Math.floor(new Date('2024-12-31T00:00:00Z').getTime() / 1000),
     });
     try {
       await verifier.verify(token);
@@ -874,14 +898,17 @@ describe('AuthVerifier', () => {
 
   it('rejects wrong audience', async () => {
     const clock = () => new Date('2025-01-01T00:00:00Z');
-    const verifier = new AuthVerifier({ clock, expectedAudience: 'expected-aud' });
-    const token = makeToken({
-      alg: 'RS256',
+    const verifier = new AuthVerifier({
+      clock,
+      expectedAudience: 'expected-aud',
+      jwksResolver: makeJwksResolver(),
+    });
+    const token = await signToken({
       iss: 'test',
       sub: 'user1',
       aud: 'wrong-aud',
       exp: 9999999999,
-      iat: 1735686000,
+      iat: Math.floor(new Date('2024-12-31T00:00:00Z').getTime() / 1000),
     });
     try {
       await verifier.verify(token);
@@ -892,20 +919,21 @@ describe('AuthVerifier', () => {
     }
   });
 
-  it('accepts valid tokens', async () => {
+  it('accepts valid tokens with cryptographic signature verification', async () => {
     const clock = () => new Date('2025-01-01T00:00:00Z');
     const verifier = new AuthVerifier({
       clock,
       expectedIssuer: 'test-issuer',
       expectedAudience: 'test-aud',
+      jwksResolver: makeJwksResolver(),
     });
-    const token = makeToken({
-      alg: 'RS256',
+    const iat = Math.floor(new Date('2024-12-31T00:00:00Z').getTime() / 1000);
+    const token = await signToken({
       iss: 'test-issuer',
       sub: 'user1',
       aud: 'test-aud',
       exp: 9999999999,
-      iat: 1735686000,
+      iat,
       scope: 'read write',
     });
     const auth = await verifier.verify(token);
@@ -914,6 +942,55 @@ describe('AuthVerifier', () => {
     expect(auth.scopes).toEqual(['read', 'write']);
     // Raw token must never be in AuthInfo
     expect((auth as unknown as Record<string, unknown>).raw_token).toBeUndefined();
+  });
+
+  it('rejects tampered payload', async () => {
+    const clock = () => new Date('2025-01-01T00:00:00Z');
+    const verifier = new AuthVerifier({ clock, jwksResolver: makeJwksResolver() });
+    const token = await signToken({
+      iss: 'test',
+      sub: 'user1',
+      exp: 9999999999,
+    });
+    // Tamper with the payload by changing a character in the base64url part
+    const parts = token.split('.');
+    parts[1] = parts[1].replace(/A/g, 'B');
+    const tampered = parts.join('.');
+    try {
+      await verifier.verify(tampered);
+      expect.unreachable();
+    } catch (e) {
+      expect(e).toBeInstanceOf(AuthError);
+      expect((e as AuthError).code).toBe('invalid_token');
+    }
+  });
+
+  it('rejects tokens with alg=none', async () => {
+    const verifier = new AuthVerifier({ jwksResolver: makeJwksResolver() });
+    const header = Buffer.from(JSON.stringify({ alg: 'none' })).toString('base64url');
+    const payload = Buffer.from(
+      JSON.stringify({ iss: 'test', sub: 'user1', exp: 9999999999 })
+    ).toString('base64url');
+    const token = `${header}.${payload}`;
+    try {
+      await verifier.verify(token);
+      expect.unreachable();
+    } catch (e) {
+      expect(e).toBeInstanceOf(AuthError);
+      expect((e as AuthError).code).toBe('invalid_token');
+    }
+  });
+
+  it('requires jwksResolver for cryptographic verification', async () => {
+    const verifier = new AuthVerifier();
+    const token = 'eyJhbGciOiJSUzI1NiJ9.eyJpc3MiOiJ0ZXN0In0.sig';
+    try {
+      await verifier.verify(token);
+      expect.unreachable();
+    } catch (e) {
+      expect(e).toBeInstanceOf(AuthError);
+      expect((e as AuthError).code).toBe('invalid_token');
+    }
   });
 });
 

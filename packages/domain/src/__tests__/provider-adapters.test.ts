@@ -6,7 +6,7 @@ import {
 } from '../openai-adapter.js';
 import { GeminiAdapter } from '../gemini-adapter.js';
 import { ProviderHealthTracker } from '../provider-health.js';
-import type { ProviderExecutionRequest } from '../provider-adapter.js';
+import type { ProviderExecutionRequest, CredentialResolver } from '../provider-adapter.js';
 
 function makeRequest(overrides: Partial<ProviderExecutionRequest> = {}): ProviderExecutionRequest {
   return {
@@ -16,14 +16,16 @@ function makeRequest(overrides: Partial<ProviderExecutionRequest> = {}): Provide
     source_id: 'gpt-4o',
     route_type: 'provider',
     task_input: { message: 'Hello' },
-    _credential: 'test-api-key',
     ...overrides,
   };
 }
 
-function mockFetch(
-  response: { ok: boolean; status: number; body: unknown; headers?: Record<string, string> }
-): typeof globalThis.fetch {
+function mockFetch(response: {
+  ok: boolean;
+  status: number;
+  body: unknown;
+  headers?: Record<string, string>;
+}): typeof globalThis.fetch {
   return vi.fn().mockResolvedValue({
     ok: response.ok,
     status: response.status,
@@ -32,9 +34,21 @@ function mockFetch(
   } as unknown as Response);
 }
 
-// ============================================================================
-// OpenAI-Compatible Adapter
-// ============================================================================
+function testCredentialResolver(credential = 'test-api-key'): CredentialResolver {
+  return {
+    async resolveCredential(_connection_id: string) {
+      return credential;
+    },
+  };
+}
+
+function rejectingCredentialResolver(): CredentialResolver {
+  return {
+    async resolveCredential(_connection_id: string) {
+      throw new Error('credential_not_found');
+    },
+  };
+}
 
 describe('OpenAICompatibleAdapter', () => {
   let adapter: OpenAICompatibleAdapter;
@@ -45,15 +59,16 @@ describe('OpenAICompatibleAdapter', () => {
       provider: 'openrouter',
       baseUrl: 'https://openrouter.ai/api',
       timeout_ms: 5000,
+      credentialResolver: testCredentialResolver(),
     });
   });
 
-  it('normalizes successful response', async () => {
+  it('normalizes successful response without raw blob', async () => {
     const fetch = mockFetch({
       ok: true,
       status: 200,
       body: {
-        choices: [{ message: { content: 'Hello back!' } }],
+        choices: [{ message: { content: 'Hello back!' }, finish_reason: 'stop' }],
         usage: { prompt_tokens: 10, completion_tokens: 5 },
       },
       headers: { 'x-request-id': 'req-123' },
@@ -62,11 +77,13 @@ describe('OpenAICompatibleAdapter', () => {
       provider: 'openrouter',
       baseUrl: 'https://openrouter.ai/api',
       fetch,
+      credentialResolver: testCredentialResolver(),
     });
 
     const result = await adapter.execute(makeRequest());
     expect(result.success).toBe(true);
-    expect(result.output).toEqual({ content: 'Hello back!', raw: expect.any(Object) } as Record<string, unknown>);
+    expect(result.output).toEqual({ content: 'Hello back!', finish_reason: 'stop' });
+    expect(result.output).not.toHaveProperty('raw');
     expect(result.tokens_used).toEqual({ input: 10, output: 5 });
     expect(result.provider_request_id).toBe('req-123');
   });
@@ -81,6 +98,7 @@ describe('OpenAICompatibleAdapter', () => {
       provider: 'openrouter',
       baseUrl: 'https://openrouter.ai/api',
       fetch,
+      credentialResolver: testCredentialResolver(),
     });
 
     const result = await adapter.execute(makeRequest());
@@ -99,6 +117,7 @@ describe('OpenAICompatibleAdapter', () => {
       provider: 'openrouter',
       baseUrl: 'https://openrouter.ai/api',
       fetch,
+      credentialResolver: testCredentialResolver(),
     });
 
     const result = await adapter.execute(makeRequest());
@@ -117,6 +136,7 @@ describe('OpenAICompatibleAdapter', () => {
       provider: 'openrouter',
       baseUrl: 'https://openrouter.ai/api',
       fetch,
+      credentialResolver: testCredentialResolver(),
     });
 
     const result = await adapter.execute(makeRequest());
@@ -126,14 +146,15 @@ describe('OpenAICompatibleAdapter', () => {
   });
 
   it('handles timeout', async () => {
-    const fetch = vi.fn().mockRejectedValue(
-      new DOMException('The operation was aborted', 'AbortError')
-    );
+    const fetch = vi
+      .fn()
+      .mockRejectedValue(new DOMException('The operation was aborted', 'AbortError'));
     adapter = new OpenAICompatibleAdapter({
       provider: 'openrouter',
       baseUrl: 'https://openrouter.ai/api',
       fetch,
       timeout_ms: 100,
+      credentialResolver: testCredentialResolver(),
     });
 
     const result = await adapter.execute(makeRequest());
@@ -148,6 +169,7 @@ describe('OpenAICompatibleAdapter', () => {
       provider: 'openrouter',
       baseUrl: 'https://openrouter.ai/api',
       fetch,
+      credentialResolver: testCredentialResolver(),
     });
 
     const result = await adapter.execute(makeRequest());
@@ -170,15 +192,16 @@ describe('OpenAICompatibleAdapter', () => {
       provider: 'openrouter',
       baseUrl: 'https://openrouter.ai/api',
       fetch,
+      credentialResolver: testCredentialResolver(),
     });
 
     const result = await adapter.execute(makeRequest({ source_id: 'gpt-4o' }));
     expect(result.actual_cost).toBeCloseTo(0.0025 + 0.005, 6);
-    expect(result.cost_breakdown).toHaveProperty('input');
-    expect(result.cost_breakdown).toHaveProperty('output');
+    expect(result.cost_breakdown).toHaveProperty('input_cost');
+    expect(result.cost_breakdown).toHaveProperty('output_cost');
   });
 
-  it('returns zero cost for unknown model (unknown, not fake zero)', async () => {
+  it('returns null cost for unknown model (unknown, not fake zero)', async () => {
     const fetch = mockFetch({
       ok: true,
       status: 200,
@@ -191,10 +214,12 @@ describe('OpenAICompatibleAdapter', () => {
       provider: 'openrouter',
       baseUrl: 'https://openrouter.ai/api',
       fetch,
+      credentialResolver: testCredentialResolver(),
     });
 
     const result = await adapter.execute(makeRequest({ source_id: 'unknown-model' }));
-    expect(result.actual_cost).toBe(0);
+    expect(result.actual_cost).toBeNull();
+    expect(result.cost_breakdown.cost_known).toBe(false);
   });
 
   it('translates messages correctly', async () => {
@@ -204,7 +229,11 @@ describe('OpenAICompatibleAdapter', () => {
       return {
         ok: true,
         status: 200,
-        json: () => Promise.resolve({ choices: [{ message: { content: 'ok' } }], usage: { prompt_tokens: 0, completion_tokens: 0 } }),
+        json: () =>
+          Promise.resolve({
+            choices: [{ message: { content: 'ok' } }],
+            usage: { prompt_tokens: 0, completion_tokens: 0 },
+          }),
         headers: new Map(),
       };
     });
@@ -212,18 +241,56 @@ describe('OpenAICompatibleAdapter', () => {
       provider: 'openrouter',
       baseUrl: 'https://openrouter.ai/api',
       fetch,
+      credentialResolver: testCredentialResolver(),
     });
 
-    await adapter.execute(makeRequest({
-      task_input: { system_prompt: 'You are helpful', message: 'Hello' },
-    }));
+    await adapter.execute(
+      makeRequest({
+        task_input: { system_prompt: 'You are helpful', message: 'Hello' },
+      })
+    );
 
-    const body = capturedBody as { model: string; messages: Array<{ role: string; content: string }> };
+    const body = capturedBody as {
+      model: string;
+      messages: Array<{ role: string; content: string }>;
+    };
     expect(body.model).toBe('gpt-4o');
     expect(body.messages).toEqual([
       { role: 'system', content: 'You are helpful' },
       { role: 'user', content: 'Hello' },
     ]);
+  });
+
+  it('classifies insufficient balance as terminal', async () => {
+    const fetch = mockFetch({
+      ok: false,
+      status: 402,
+      body: { error: { message: 'Insufficient credits' } },
+    });
+    adapter = new OpenAICompatibleAdapter({
+      provider: 'openrouter',
+      baseUrl: 'https://openrouter.ai/api',
+      fetch,
+      credentialResolver: testCredentialResolver(),
+    });
+
+    const result = await adapter.execute(makeRequest());
+    expect(result.success).toBe(false);
+    expect(result.error_classification).toBe('insufficient_balance');
+    expect(result.is_retryable).toBe(false);
+  });
+
+  it('credential resolution failure returns credential_missing', async () => {
+    adapter = new OpenAICompatibleAdapter({
+      provider: 'openrouter',
+      baseUrl: 'https://openrouter.ai/api',
+      credentialResolver: rejectingCredentialResolver(),
+    });
+
+    const result = await adapter.execute(makeRequest());
+    expect(result.success).toBe(false);
+    expect(result.error_classification).toBe('credential_missing');
+    expect(result.is_retryable).toBe(false);
   });
 
   it('cancel returns not_supported', async () => {
@@ -232,55 +299,85 @@ describe('OpenAICompatibleAdapter', () => {
   });
 });
 
-// ============================================================================
-// Gemini Adapter
-// ============================================================================
-
 describe('GeminiAdapter', () => {
   let adapter: GeminiAdapter;
 
   beforeEach(() => {
-    adapter = new GeminiAdapter();
+    adapter = new GeminiAdapter({ credentialResolver: testCredentialResolver() });
   });
 
-  it('translates to Gemini format and normalizes response', async () => {
-    let capturedBody: unknown;
+  it('translates to Gemini format without raw response blob', async () => {
+    let capturedInit: unknown;
     const fetch = vi.fn().mockImplementation(async (_url: string, init: RequestInit) => {
-      capturedBody = JSON.parse(init.body as string);
+      capturedInit = init;
       return {
         ok: true,
         status: 200,
-        json: () => Promise.resolve({
-          candidates: [{ content: { parts: [{ text: 'Gemini says hello' }] } }],
-          usageMetadata: { promptTokenCount: 15, candidatesTokenCount: 8 },
-        }),
+        json: () =>
+          Promise.resolve({
+            candidates: [
+              { content: { parts: [{ text: 'Gemini says hello' }] }, finishReason: 'STOP' },
+            ],
+            usageMetadata: { promptTokenCount: 15, candidatesTokenCount: 8 },
+          }),
         headers: new Map(),
       };
     });
-    adapter = new GeminiAdapter({ fetch });
+    adapter = new GeminiAdapter({ fetch, credentialResolver: testCredentialResolver() });
 
-    const result = await adapter.execute(makeRequest({
-      provider: 'google',
-      source_id: 'gemini-pro',
-      task_input: { system_prompt: 'Be helpful', message: 'Hi' },
-    }));
+    const result = await adapter.execute(
+      makeRequest({
+        provider: 'google',
+        source_id: 'gemini-pro',
+        task_input: { system_prompt: 'Be helpful', message: 'Hi' },
+      })
+    );
 
     expect(result.success).toBe(true);
-    expect(result.output).toEqual({ content: 'Gemini says hello', raw: expect.any(Object) } as Record<string, unknown>);
+    expect(result.output).toEqual({ content: 'Gemini says hello', finish_reason: 'STOP' });
+    expect(result.output).not.toHaveProperty('raw');
     expect(result.tokens_used).toEqual({ input: 15, output: 8 });
 
-    const body = capturedBody as { contents: unknown[]; system_instruction?: unknown };
-    expect(body.system_instruction).toEqual({ parts: [{ text: 'Be helpful' }] });
-    expect(body.contents[0]).toEqual({ role: 'user', parts: [{ text: 'Hi' }] });
+    const init = capturedInit as { headers: Record<string, string> };
+    expect(init.headers['x-goog-api-key']).toBe('test-api-key');
   });
 
-  it('fails without credential', async () => {
-    const result = await adapter.execute(makeRequest({
-      provider: 'google',
-      _credential: undefined,
-    }));
+  it('does not put API key in URL', async () => {
+    let capturedUrl = '';
+    const fetch = vi.fn().mockImplementation(async (url: string, _init: RequestInit) => {
+      capturedUrl = url;
+      return {
+        ok: true,
+        status: 200,
+        json: () =>
+          Promise.resolve({
+            candidates: [{ content: { parts: [{ text: 'ok' }] } }],
+            usageMetadata: {},
+          }),
+        headers: new Map(),
+      };
+    });
+    adapter = new GeminiAdapter({ fetch, credentialResolver: testCredentialResolver() });
+
+    await adapter.execute(makeRequest({ provider: 'google', source_id: 'gemini-pro' }));
+    expect(capturedUrl).not.toContain('key=');
+    expect(capturedUrl).not.toContain('test-api-key');
+    expect(capturedUrl).toBe(
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent'
+    );
+  });
+
+  it('fails safely when credential resolution fails', async () => {
+    adapter = new GeminiAdapter({ credentialResolver: rejectingCredentialResolver() });
+
+    const result = await adapter.execute(
+      makeRequest({
+        provider: 'google',
+        source_id: 'gemini-pro',
+      })
+    );
     expect(result.success).toBe(false);
-    expect(result.error_classification).toBe('authentication_failed');
+    expect(result.error_classification).toBe('credential_missing');
     expect(result.is_retryable).toBe(false);
   });
 
@@ -291,29 +388,40 @@ describe('GeminiAdapter', () => {
       json: () => Promise.resolve({ error: { code: 429, message: 'Quota exceeded' } }),
       headers: new Map(),
     });
-    adapter = new GeminiAdapter({ fetch });
+    adapter = new GeminiAdapter({ fetch, credentialResolver: testCredentialResolver() });
 
-    const result = await adapter.execute(makeRequest({ provider: 'google' }));
+    const result = await adapter.execute(makeRequest({ provider: 'google', source_id: 'test' }));
     expect(result.success).toBe(false);
     expect(result.error_classification).toBe('rate_limited');
     expect(result.is_retryable).toBe(true);
   });
 
   it('handles Gemini timeout', async () => {
-    const fetch = vi.fn().mockRejectedValue(
-      new DOMException('The operation was aborted', 'AbortError')
-    );
-    adapter = new GeminiAdapter({ fetch });
+    const fetch = vi
+      .fn()
+      .mockRejectedValue(new DOMException('The operation was aborted', 'AbortError'));
+    adapter = new GeminiAdapter({ fetch, credentialResolver: testCredentialResolver() });
 
-    const result = await adapter.execute(makeRequest({ provider: 'google' }));
+    const result = await adapter.execute(makeRequest({ provider: 'google', source_id: 'test' }));
     expect(result.success).toBe(false);
     expect(result.error_classification).toBe('timeout');
   });
-});
 
-// ============================================================================
-// Provider Health Tracker
-// ============================================================================
+  it('returns null cost (unknown, not zero)', async () => {
+    const fetch = mockFetch({
+      ok: true,
+      status: 200,
+      body: {
+        candidates: [{ content: { parts: [{ text: 'done' }] } }],
+        usageMetadata: { promptTokenCount: 100, candidatesTokenCount: 50 },
+      },
+    });
+    adapter = new GeminiAdapter({ fetch, credentialResolver: testCredentialResolver() });
+
+    const result = await adapter.execute(makeRequest({ provider: 'google', source_id: 'test' }));
+    expect(result.actual_cost).toBeNull();
+  });
+});
 
 describe('ProviderHealthTracker', () => {
   let tracker: ProviderHealthTracker;
@@ -335,24 +443,18 @@ describe('ProviderHealthTracker', () => {
   it('becomes degraded after threshold failures', () => {
     tracker.recordFailure('openai');
     expect(tracker.getHealth('openai')).toBe('healthy');
-
     tracker.recordFailure('openai');
     expect(tracker.getHealth('openai')).toBe('degraded');
   });
 
   it('becomes unavailable after high failure threshold', () => {
-    for (let i = 0; i < 5; i++) {
-      tracker.recordFailure('openai');
-    }
+    for (let i = 0; i < 5; i++) tracker.recordFailure('openai');
     expect(tracker.getHealth('openai')).toBe('unavailable');
   });
 
   it('recovers to healthy on success', () => {
-    for (let i = 0; i < 3; i++) {
-      tracker.recordFailure('openai');
-    }
+    for (let i = 0; i < 3; i++) tracker.recordFailure('openai');
     expect(tracker.getHealth('openai')).toBe('degraded');
-
     tracker.recordSuccess('openai');
     expect(tracker.getHealth('openai')).toBe('healthy');
   });
@@ -361,7 +463,6 @@ describe('ProviderHealthTracker', () => {
     tracker.recordFailure('openai');
     tracker.recordFailure('openai');
     tracker.recordFailure('deepseek');
-
     expect(tracker.getHealth('openai')).toBe('degraded');
     expect(tracker.getHealth('deepseek')).toBe('healthy');
   });
@@ -369,7 +470,6 @@ describe('ProviderHealthTracker', () => {
   it('getEntry returns snapshot', () => {
     tracker.recordSuccess('openai');
     tracker.recordFailure('openai');
-
     const entry = tracker.getEntry('openai');
     expect(entry.consecutive_failures).toBe(1);
     expect(entry.total_successes).toBe(1);
@@ -378,11 +478,8 @@ describe('ProviderHealthTracker', () => {
   });
 
   it('reset clears failures', () => {
-    for (let i = 0; i < 3; i++) {
-      tracker.recordFailure('openai');
-    }
+    for (let i = 0; i < 3; i++) tracker.recordFailure('openai');
     expect(tracker.getHealth('openai')).toBe('degraded');
-
     tracker.reset('openai');
     expect(tracker.getHealth('openai')).toBe('healthy');
   });
@@ -390,7 +487,6 @@ describe('ProviderHealthTracker', () => {
   it('getAllEntries returns all providers', () => {
     tracker.recordSuccess('openai');
     tracker.recordFailure('deepseek');
-
     const all = tracker.getAllEntries();
     expect(all).toHaveLength(2);
     expect(all.map((e) => e.provider)).toContain('openai');

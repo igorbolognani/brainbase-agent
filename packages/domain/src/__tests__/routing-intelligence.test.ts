@@ -65,11 +65,19 @@ describe('EvidenceBasedRouter', () => {
     it('ranks cheaper routes higher', () => {
       const route1 = makeRoute({
         route_id: 'r1',
-        pricing: { ...makeRoute().pricing, input_cost_per_1k_tokens: 0.05, output_cost_per_1k_tokens: 0.1 },
+        pricing: {
+          ...makeRoute().pricing,
+          input_cost_per_1k_tokens: 0.05,
+          output_cost_per_1k_tokens: 0.1,
+        },
       });
       const route2 = makeRoute({
         route_id: 'r2',
-        pricing: { ...makeRoute().pricing, input_cost_per_1k_tokens: 0.01, output_cost_per_1k_tokens: 0.02 },
+        pricing: {
+          ...makeRoute().pricing,
+          input_cost_per_1k_tokens: 0.01,
+          output_cost_per_1k_tokens: 0.02,
+        },
       });
 
       const scores = router.scoreRoutes(
@@ -125,7 +133,10 @@ describe('EvidenceBasedRouter', () => {
     it('ranks higher quality routes higher', () => {
       const route1 = makeRoute({ route_id: 'r1' });
       const route2 = makeRoute({ route_id: 'r2' });
-      const qualityScores = new Map([['r1', 0.3], ['r2', 0.8]]);
+      const qualityScores = new Map([
+        ['r1', 0.3],
+        ['r2', 0.8],
+      ]);
 
       const scores = router.scoreRoutes(
         [route1, route2],
@@ -156,13 +167,24 @@ describe('EvidenceBasedRouter', () => {
     it('combines cost and quality', () => {
       const route1 = makeRoute({
         route_id: 'r1',
-        pricing: { ...makeRoute().pricing, input_cost_per_1k_tokens: 0.01, output_cost_per_1k_tokens: 0.01 },
+        pricing: {
+          ...makeRoute().pricing,
+          input_cost_per_1k_tokens: 0.01,
+          output_cost_per_1k_tokens: 0.01,
+        },
       });
       const route2 = makeRoute({
         route_id: 'r2',
-        pricing: { ...makeRoute().pricing, input_cost_per_1k_tokens: 0.1, output_cost_per_1k_tokens: 0.1 },
+        pricing: {
+          ...makeRoute().pricing,
+          input_cost_per_1k_tokens: 0.1,
+          output_cost_per_1k_tokens: 0.1,
+        },
       });
-      const qualityScores = new Map([['r1', 0.3], ['r2', 0.9]]);
+      const qualityScores = new Map([
+        ['r1', 0.3],
+        ['r2', 0.9],
+      ]);
 
       const scores = router.scoreRoutes(
         [route1, route2],
@@ -202,9 +224,30 @@ describe('EvidenceBasedRouter', () => {
 describe('rankByScore', () => {
   it('sorts by total score descending', () => {
     const scores: RoutingScore[] = [
-      { route_id: 'r1', total_score: 0.3, cost_score: 0.3, quality_score: 0, health_penalty: 0, reasons: [] },
-      { route_id: 'r2', total_score: 0.8, cost_score: 0.8, quality_score: 0, health_penalty: 0, reasons: [] },
-      { route_id: 'r3', total_score: 0.5, cost_score: 0.5, quality_score: 0, health_penalty: 0, reasons: [] },
+      {
+        route_id: 'r1',
+        total_score: 0.3,
+        cost_score: 0.3,
+        quality_score: 0,
+        health_penalty: 0,
+        reasons: [],
+      },
+      {
+        route_id: 'r2',
+        total_score: 0.8,
+        cost_score: 0.8,
+        quality_score: 0,
+        health_penalty: 0,
+        reasons: [],
+      },
+      {
+        route_id: 'r3',
+        total_score: 0.5,
+        cost_score: 0.5,
+        quality_score: 0,
+        health_penalty: 0,
+        reasons: [],
+      },
     ];
 
     const ranked = rankByScore(scores);
@@ -215,8 +258,22 @@ describe('rankByScore', () => {
 describe('explainRoutingDecision', () => {
   it('generates explanations for rejected routes', () => {
     const scores: RoutingScore[] = [
-      { route_id: 'r1', total_score: 0.5, cost_score: 0.5, quality_score: 0, health_penalty: 0, reasons: [] },
-      { route_id: 'r2', total_score: 0.3, cost_score: 0.3, quality_score: 0, health_penalty: 0.2, reasons: ['health_degraded'] },
+      {
+        route_id: 'r1',
+        total_score: 0.5,
+        cost_score: 0.5,
+        quality_score: 0,
+        health_penalty: 0,
+        reasons: [],
+      },
+      {
+        route_id: 'r2',
+        total_score: 0.3,
+        cost_score: 0.3,
+        quality_score: 0,
+        health_penalty: 0.2,
+        reasons: ['health_degraded'],
+      },
     ];
 
     const explanations = explainRoutingDecision(scores);
@@ -408,10 +465,50 @@ describe('BenchmarkIngester', () => {
 
   it('rejects malformed entries', () => {
     const entries: BenchmarkEntry[] = [
-      { model_id: '', provider: 'openai', benchmark: 'mmlu', domain: 'test', score: 0.8, sample_size: 10, source: 'test', confidence: 0.9, version: 'v1' },
-      { model_id: 'gpt-4o', provider: 'openai', benchmark: 'mmlu', domain: 'test', score: 1.5, sample_size: 10, source: 'test', confidence: 0.9, version: 'v1' },
-      { model_id: 'gpt-4o', provider: 'openai', benchmark: 'mmlu', domain: 'test', score: 0.8, sample_size: -1, source: 'test', confidence: 0.9, version: 'v1' },
-      { model_id: 'gpt-4o', provider: 'openai', benchmark: 'mmlu', domain: 'test', score: 0.8, sample_size: 10, source: 'test', confidence: 1.5, version: 'v1' },
+      {
+        model_id: '',
+        provider: 'openai',
+        benchmark: 'mmlu',
+        domain: 'test',
+        score: 0.8,
+        sample_size: 10,
+        source: 'test',
+        confidence: 0.9,
+        version: 'v1',
+      },
+      {
+        model_id: 'gpt-4o',
+        provider: 'openai',
+        benchmark: 'mmlu',
+        domain: 'test',
+        score: 1.5,
+        sample_size: 10,
+        source: 'test',
+        confidence: 0.9,
+        version: 'v1',
+      },
+      {
+        model_id: 'gpt-4o',
+        provider: 'openai',
+        benchmark: 'mmlu',
+        domain: 'test',
+        score: 0.8,
+        sample_size: -1,
+        source: 'test',
+        confidence: 0.9,
+        version: 'v1',
+      },
+      {
+        model_id: 'gpt-4o',
+        provider: 'openai',
+        benchmark: 'mmlu',
+        domain: 'test',
+        score: 0.8,
+        sample_size: 10,
+        source: 'test',
+        confidence: 1.5,
+        version: 'v1',
+      },
     ];
 
     const result = ingester.ingest(entries, importFn);
@@ -423,9 +520,39 @@ describe('BenchmarkIngester', () => {
 
   it('accepts valid and rejects invalid in mixed batch', () => {
     const entries: BenchmarkEntry[] = [
-      { model_id: 'gpt-4o', provider: 'openai', benchmark: 'mmlu', domain: 'test', score: 0.8, sample_size: 10, source: 'test', confidence: 0.9, version: 'v1' },
-      { model_id: '', provider: 'openai', benchmark: 'mmlu', domain: 'test', score: 0.8, sample_size: 10, source: 'test', confidence: 0.9, version: 'v1' },
-      { model_id: 'claude-3', provider: 'anthropic', benchmark: 'lm-eval', domain: 'general', score: 0.9, sample_size: 50, source: 'paper', confidence: 0.8, version: 'v1' },
+      {
+        model_id: 'gpt-4o',
+        provider: 'openai',
+        benchmark: 'mmlu',
+        domain: 'test',
+        score: 0.8,
+        sample_size: 10,
+        source: 'test',
+        confidence: 0.9,
+        version: 'v1',
+      },
+      {
+        model_id: '',
+        provider: 'openai',
+        benchmark: 'mmlu',
+        domain: 'test',
+        score: 0.8,
+        sample_size: 10,
+        source: 'test',
+        confidence: 0.9,
+        version: 'v1',
+      },
+      {
+        model_id: 'claude-3',
+        provider: 'anthropic',
+        benchmark: 'lm-eval',
+        domain: 'general',
+        score: 0.9,
+        sample_size: 50,
+        source: 'paper',
+        confidence: 0.8,
+        version: 'v1',
+      },
     ];
 
     const result = ingester.ingest(entries, importFn);

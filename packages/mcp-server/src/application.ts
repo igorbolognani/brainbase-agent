@@ -36,6 +36,7 @@ import {
   ProviderAdapterRegistry,
   RoutingEngine,
   SyntheticExecutor,
+  type CredentialResolver,
   type FallbackPlanner,
   type ExecutionCoordinatorRepositories,
   type ExecutionExecutor,
@@ -248,6 +249,7 @@ export interface SyntheticApplicationOptions {
   clock?: () => Date;
   provider_execution_enabled?: boolean;
   adapterRegistry?: ProviderAdapterRegistry;
+  credentialResolver?: CredentialResolver;
 }
 
 export interface GPTRouterApplication {
@@ -624,13 +626,13 @@ function createSyntheticRepositories(
       return [...store.usage.values()]
         .filter((record) => record.account_id === account_id)
         .filter((record) => record.reconciled_at >= startOfDay(new Date()))
-        .reduce((sum, record) => sum + record.actual_cost, 0);
+        .reduce((sum, record) => sum + (record.actual_cost ?? 0), 0);
     },
     async getMonthlySpending(account_id) {
       return [...store.usage.values()]
         .filter((record) => record.account_id === account_id)
         .filter((record) => record.reconciled_at >= startOfMonth(new Date()))
-        .reduce((sum, record) => sum + record.actual_cost, 0);
+        .reduce((sum, record) => sum + (record.actual_cost ?? 0), 0);
     },
   };
 
@@ -953,7 +955,15 @@ export function createSyntheticGPTRouterApplication(
     registry.registerAdapter('synthetic-provider-alpha', fakeAdapter);
     registry.registerAdapter('synthetic-provider-beta', fakeAdapter);
     registry.setDefaultAdapter(fakeAdapter);
-    executor = new AdapterExecutionCoordinatorBridge({ registry });
+    const credentialResolver: CredentialResolver = {
+      async resolveCredential(_connection_id: string) {
+        return 'synthetic-test-credential';
+      },
+    };
+    executor = new AdapterExecutionCoordinatorBridge({
+      registry,
+      credentialResolver: options.credentialResolver ?? credentialResolver,
+    });
     verifier = new AdapterExecutionVerifier();
   }
 
@@ -1063,7 +1073,7 @@ export function createSyntheticGPTRouterApplication(
       const latestDecision = decisions.at(-1) ?? null;
       const latestAttempt = attempts.at(-1) ?? null;
       const estimatedCost = latestDecision?.estimated_cost ?? null;
-      const actualCost = taskUsage.reduce((sum, record) => sum + record.actual_cost, 0);
+      const actualCost = taskUsage.reduce((sum, record) => sum + (record.actual_cost ?? 0), 0);
       const auditStatus = {
         audit_degraded: repositories.store.auditFailureCount > 0,
         audit_failure_count: repositories.store.auditFailureCount,
@@ -1161,7 +1171,7 @@ export function createSyntheticGPTRouterApplication(
         successful_executions: attempts.filter((attempt) => attempt.status === 'completed').length,
         failed_attempts: attempts.filter((attempt) => attempt.status === 'failed').length,
         cancelled_attempts: attempts.filter((attempt) => attempt.status === 'cancelled').length,
-        actual_cost: usage.reduce((sum, record) => sum + record.actual_cost, 0),
+        actual_cost: usage.reduce((sum, record) => sum + (record.actual_cost ?? 0), 0),
         estimated_planned_cost: estimatedPlannedCost,
         actual_usage_records: usage.length,
         cost_variance: usage.reduce((sum, record) => sum + (record.cost_variance ?? 0), 0),
@@ -1190,7 +1200,7 @@ export function createSyntheticGPTRouterApplication(
         failed_attempt_count: attempts.filter((attempt) => attempt.status === 'failed').length,
         cancelled_attempt_count: attempts.filter((attempt) => attempt.status === 'cancelled')
           .length,
-        actual_spend: usage.reduce((sum, record) => sum + record.actual_cost, 0),
+        actual_spend: usage.reduce((sum, record) => sum + (record.actual_cost ?? 0), 0),
         estimated_planned_cost: decisions.reduce(
           (sum, decision) => sum + (decision.estimated_cost ?? 0),
           0

@@ -214,7 +214,7 @@ export const usage_records = sqliteTable(
       .unique()
       .references(() => execution_attempts.attempt_id),
     provider_usage_data: text('provider_usage_data').notNull(),
-    actual_cost: real('actual_cost').notNull(),
+    actual_cost: real('actual_cost'),
     cost_breakdown: text('cost_breakdown').notNull(),
     input_tokens: integer('input_tokens'),
     output_tokens: integer('output_tokens'),

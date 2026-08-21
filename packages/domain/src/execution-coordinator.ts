@@ -30,7 +30,7 @@ export interface ExecutionInput {
 
 export interface ExecutionOutput {
   provider_usage_data: Record<string, unknown>;
-  actual_cost: number;
+  actual_cost: number | null; // null = unknown; 0 = known zero
   cost_breakdown: Record<string, unknown>;
   tokens_used: { input: number; output: number } | null;
 }
@@ -127,7 +127,7 @@ export interface ExecutionProjection {
   failure_code: string | null;
   estimated_cost: number | null;
   estimated_total_cost: number;
-  actual_cost: number;
+  actual_cost: number; // Summed from usage records (null costs excluded from sum)
   usage_id: string | null;
   replayed: boolean;
   data_mode: 'synthetic_execution';
@@ -960,7 +960,10 @@ export class ExecutionCoordinator {
       actual_cost: output.actual_cost,
       cost_breakdown: output.cost_breakdown,
       tokens_used: output.tokens_used,
-      cost_variance: output.actual_cost - estimatedCost,
+      cost_variance:
+        output.actual_cost !== null && estimatedCost !== null
+          ? output.actual_cost - estimatedCost
+          : null,
     });
     await this.recordAudit(context, 'usage.reconciled', attempt.task_id, {
       attempt_id: attempt.attempt_id,
@@ -1016,7 +1019,7 @@ export class ExecutionCoordinator {
         (sum, decision) => sum + (decision.estimated_cost ?? 0),
         0
       ),
-      actual_cost: records.reduce((sum, record) => sum + record.actual_cost, 0),
+      actual_cost: records.reduce((sum, record) => sum + (record.actual_cost ?? 0), 0),
       usage_id: records.at(-1)?.usage_id ?? null,
       replayed,
       data_mode: 'synthetic_execution',

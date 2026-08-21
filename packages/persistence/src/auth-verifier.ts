@@ -1,9 +1,11 @@
 /**
- * Production Auth Verifier boundary.
- * Validates JWT/OIDC tokens server-side.
+ * Production Auth Verifier boundary using jose for cryptographic JWT verification.
+ * Validates JWT/OIDC tokens with signature verification, issuer, audience, expiry.
  * NEVER exposes raw tokens to domain/audit/UI layers.
- * Uses standards-based verification with injectable JWKS/network retrieval.
+ * Injectable JWKS resolution for flexible deployment.
  */
+
+import * as jose from 'jose';
 
 export interface AuthInfo {
   issuer: string;
@@ -12,47 +14,21 @@ export interface AuthInfo {
   scopes?: string[];
   expires_at: Date;
   issued_at: Date;
-  raw_token?: string; // NEVER passed downstream
-}
-
-export interface JwksKey {
-  kid: string;
-  kty: string;
-  n?: string;
-  e?: string;
-  alg: string;
-  use?: string;
+  // raw_token deliberately omitted — never passed downstream
 }
 
 export interface AuthVerifierOptions {
   expectedIssuer?: string;
   expectedAudience?: string;
   clock?: () => Date;
-  jwksCache?: Map<string, JwksKey[]>;
-}
-
-/**
- * Minimal JWT header/payload decoder without crypto.
- * For production, use a proper JWT library with signature verification.
- * This provides the structural verification seam.
- */
-function base64UrlDecode(input: string): string {
-  const base64 = input.replace(/-/g, '+').replace(/_/g, '/');
-  const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4);
-  return Buffer.from(padded, 'base64').toString('utf-8');
-}
-
-function parseJwtPayload(token: string): {
-  header: Record<string, unknown>;
-  payload: Record<string, unknown>;
-} {
-  const parts = token.split('.');
-  if (parts.length < 2) {
-    throw new Error('invalid_token_format');
-  }
-  const header = JSON.parse(base64UrlDecode(parts[0])) as Record<string, unknown>;
-  const payload = JSON.parse(base64UrlDecode(parts[1])) as Record<string, unknown>;
-  return { header, payload };
+  /**
+   * Injectable JWKS resolver. Receives the issuer from the token header/payload
+   * and must return the matching signing keys. This enables:
+   * - Local/static JWK sets in tests
+   * - JWKS endpoint resolution in production
+   * - Multi-issuer support
+   */
+  jwksResolver?: (issuer: string) => Promise<jose.JWK[]>;
 }
 
 export class AuthVerifier {
@@ -63,38 +39,81 @@ export class AuthVerifier {
   }
 
   /**
-   * Verify a bearer token and extract safe AuthInfo.
-   * Never returns the raw token in the AuthInfo passed downstream.
+   * Verify a bearer token with cryptographic signature verification.
+   * Returns safe AuthInfo WITHOUT the raw token.
    */
   async verify(token: string, options?: { issuer?: string; audience?: string }): Promise<AuthInfo> {
     if (!token || token.length === 0) {
       throw new AuthError('invalid_token', 'Token is empty');
     }
 
-    let payload: Record<string, unknown>;
-    let header: Record<string, unknown>;
+    // Parse header to check algorithm before attempting verification
+    let header: jose.ProtectedHeaderParameters;
     try {
-      ({ header, payload } = parseJwtPayload(token));
+      header = jose.decodeProtectedHeader(token);
     } catch {
       throw new AuthError('invalid_token', 'Token has invalid format');
     }
 
-    // Check algorithm - reject 'none' and unexpected algorithms
-    const alg = header.alg as string;
+    // Reject alg=none
+    const alg = header.alg;
     if (!alg || alg === 'none') {
       throw new AuthError('invalid_token', 'Token algorithm is not acceptable');
     }
 
+    // Attempt cryptographic signature verification using jose compactVerify.
+    // We verify signature only — claim validation (exp, iss, aud) is done below
+    // for precise error mapping.
+    let payload: jose.JWTPayload;
+    try {
+      if (!this.options.jwksResolver) {
+        throw new AuthError(
+          'invalid_token',
+          'JWKS resolver is required for cryptographic verification'
+        );
+      }
+
+      const issuerHint = typeof header.iss === 'string' ? header.iss : '';
+      const keys = await this.options.jwksResolver(issuerHint);
+      if (!keys || keys.length === 0) {
+        throw new AuthError('invalid_token', 'No signing keys available for verification');
+      }
+
+      // Try each key until one succeeds
+      let lastError: Error | null = null;
+      let verified = false;
+      for (const jwk of keys) {
+        try {
+          const cryptoKey = await jose.importJWK(jwk, alg);
+          // compactVerify only checks signature, not claims
+          const compact = token.split('.').slice(0, 2).join('.') + '.' + token.split('.')[2];
+          await jose.compactVerify(compact, cryptoKey as jose.KeyInput);
+          // Signature valid — now decode payload for claim checks
+          payload = jose.decodeJwt(token);
+          verified = true;
+          break;
+        } catch (error) {
+          lastError = error instanceof Error ? error : new Error(String(error));
+        }
+      }
+      if (!verified) {
+        throw lastError ?? new Error('No verification keys succeeded');
+      }
+    } catch (error) {
+      if (error instanceof AuthError) throw error;
+      throw new AuthError('invalid_token', 'Token signature verification failed');
+    }
+
     // Issuer validation
     const issuer = options?.issuer ?? this.options.expectedIssuer;
-    if (issuer && payload.iss !== issuer) {
+    if (issuer && payload!.iss !== issuer) {
       throw new AuthError('wrong_issuer', 'Token issuer does not match');
     }
 
     // Audience validation
     const audience = options?.audience ?? this.options.expectedAudience;
     if (audience) {
-      const tokenAud = payload.aud;
+      const tokenAud = payload!.aud;
       const audMatch = Array.isArray(tokenAud)
         ? tokenAud.includes(audience)
         : tokenAud === audience;
@@ -104,36 +123,44 @@ export class AuthVerifier {
     }
 
     // Expiry validation
-    if (typeof payload.exp !== 'number') {
+    if (typeof payload!.exp !== 'number') {
       throw new AuthError('invalid_token', 'Token has no expiration');
     }
-    const expiresAt = new Date(payload.exp * 1000);
+    const expiresAt = new Date(payload!.exp * 1000);
     if (this.clock() > expiresAt) {
       throw new AuthError('token_expired', 'Token has expired');
     }
 
+    // Not-before validation
+    if (typeof payload!.nbf === 'number') {
+      const notBefore = new Date(payload!.nbf * 1000);
+      if (this.clock() < notBefore) {
+        throw new AuthError('invalid_token', 'Token is not yet valid');
+      }
+    }
+
     // Issued-at validation (reject tokens from the future)
-    if (typeof payload.iat === 'number') {
-      const issuedAt = new Date(payload.iat * 1000);
+    if (typeof payload!.iat === 'number') {
+      const issuedAt = new Date(payload!.iat * 1000);
       if (issuedAt > this.clock()) {
         throw new AuthError('invalid_token', 'Token issued in the future');
       }
     }
 
-    const subject = typeof payload.sub === 'string' ? payload.sub : '';
+    const subject = typeof payload!.sub === 'string' ? payload!.sub : '';
     if (!subject) {
       throw new AuthError('invalid_token', 'Token has no subject');
     }
 
     // Return AuthInfo WITHOUT the raw token
     return {
-      issuer: payload.iss as string,
+      issuer: payload!.iss as string,
       subject,
-      audience: typeof payload.aud === 'string' ? payload.aud : undefined,
-      scopes: typeof payload.scope === 'string' ? payload.scope.split(' ') : undefined,
+      audience: typeof payload!.aud === 'string' ? payload!.aud : undefined,
+      scopes: typeof payload!.scope === 'string' ? payload!.scope.split(' ') : undefined,
       expires_at: expiresAt,
-      issued_at: typeof payload.iat === 'number' ? new Date(payload.iat * 1000) : new Date(),
-      // raw_token deliberately omitted - never passed downstream
+      issued_at: typeof payload!.iat === 'number' ? new Date(payload!.iat * 1000) : new Date(),
+      // raw_token deliberately omitted — never passed downstream
     };
   }
 }
@@ -151,6 +178,7 @@ export class AuthError extends Error {
 
 /**
  * Fake auth verifier for tests. Produces deterministic AuthInfo from a token string.
+ * Does NOT perform cryptographic verification — test-only.
  */
 export class FakeAuthVerifier extends AuthVerifier {
   constructor(
@@ -185,7 +213,7 @@ export class FakeAuthVerifier extends AuthVerifier {
       expires_at: new Date(now.getTime() + expiresInMs),
       issued_at: now,
     };
-    // Deterministic test token - not a real JWT
+    // Deterministic test token - not a real JWT, used only in unit tests
     const token = `fake.${Buffer.from(JSON.stringify({ iss: issuer, sub: subject, account_id: accountId })).toString('base64url')}.sig`;
     return { token, info };
   }

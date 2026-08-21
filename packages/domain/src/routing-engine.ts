@@ -19,6 +19,7 @@ import type {
   RoutePerformanceMetadata,
   Connection,
 } from '@gptrouter/contracts';
+import type { ProviderHealthState } from './provider-health.js';
 import { generateId } from './utils.js';
 
 export interface RoutingEngineDependencies {
@@ -34,6 +35,13 @@ export interface RoutingEngineDependencies {
    * Required only for policies whose admissibility depends on connection-owned data.
    */
   getConnection?: (connection_id: string) => Promise<Connection | null>;
+  /**
+   * Connection-scoped health state resolver.
+   * Returns the health state for a specific connection.
+   * Routes through unavailable connections are rejected in admissibility.
+   * Keyed by connection_id to prevent cross-account/cross-tenant health contamination.
+   */
+  getConnectionHealth?: (connection_id: string) => Promise<ProviderHealthState>;
 }
 
 export class RoutingEngine {
@@ -126,6 +134,19 @@ export class RoutingEngine {
             reason_code: 'unavailable' as const,
             details: `Route is ${route.availability_status}`,
           };
+        }
+
+        // Connection-scoped health check
+        if (this.deps.getConnectionHealth) {
+          const healthState = await this.deps.getConnectionHealth(route.connection_id);
+          if (healthState === 'unavailable') {
+            return {
+              route,
+              admissible: false,
+              reason_code: 'unavailable' as const,
+              details: `Connection ${route.connection_id} is unhealthy (unavailable)`,
+            };
+          }
         }
 
         const policyCheck = await this.satisfiesPolicy(route, policy, task.account_id);
