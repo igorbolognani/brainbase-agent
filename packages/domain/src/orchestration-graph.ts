@@ -87,10 +87,10 @@ export class OrchestrationGraphBuilder {
     const node: OrchestrationNode = {
       node_id: `node-${randomId()}`,
       graph_id: this.graph.graph_id,
-      parent_node_id: input.parent_node_id,
+      parent_node_id: input.parent_node_id ?? null,
       role: input.role,
-      execution_id: input.execution_id,
-      decision_id: input.decision_id,
+      execution_id: input.execution_id ?? null,
+      decision_id: input.decision_id ?? null,
       status: 'pending',
       sort_order,
       created_at: new Date(),

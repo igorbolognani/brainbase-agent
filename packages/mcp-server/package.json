@@ -4,6 +4,16 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./control-plane-api": {
+      "types": "./dist/control-plane-api.d.ts",
+      "import": "./dist/control-plane-api.js"
+    }
+  },
   "bin": {
     "gptrouter-mcp": "./dist/index.js"
   },

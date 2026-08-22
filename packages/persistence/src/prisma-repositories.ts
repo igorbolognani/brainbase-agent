@@ -1191,7 +1191,10 @@ export class PrismaModelOfferingRepository implements ModelOfferingRepository {
     return rowToModelOffering(row);
   }
 
-  async updateHealth(offering_id: string, health_state: ModelOffering['health_state']): Promise<void> {
+  async updateHealth(
+    offering_id: string,
+    health_state: ModelOffering['health_state']
+  ): Promise<void> {
     await this.prisma.modelOffering.updateMany({
       where: { offering_id },
       data: { health_state },
@@ -1303,10 +1306,7 @@ export class PrismaOrchestrationGraphRepository implements OrchestrationGraphRep
     return rowToOrchestrationGraph(row);
   }
 
-  async updateGraphStatus(
-    graph_id: string,
-    status: OrchestrationGraph['status']
-  ): Promise<void> {
+  async updateGraphStatus(graph_id: string, status: OrchestrationGraph['status']): Promise<void> {
     const result = await this.prisma.orchestrationGraph.updateMany({
       where: { graph_id },
       data: { status },
@@ -1340,10 +1340,7 @@ export class PrismaOrchestrationGraphRepository implements OrchestrationGraphRep
     return rowToOrchestrationNode(row);
   }
 
-  async updateNodeStatus(
-    node_id: string,
-    status: OrchestrationNode['status']
-  ): Promise<void> {
+  async updateNodeStatus(node_id: string, status: OrchestrationNode['status']): Promise<void> {
     const result = await this.prisma.orchestrationNode.updateMany({
       where: { node_id },
       data: { status },
