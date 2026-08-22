@@ -5,7 +5,13 @@
  * Unsupported strategies fail closed.
  */
 
-import type { ModelRoute, RoutingPolicy, RoutingScore, HealthState } from '@gptrouter/contracts';
+import type {
+  ModelRoute,
+  RoutingPolicy,
+  RoutingScore,
+  HealthState,
+  PricingStatus,
+} from '@gptrouter/contracts';
 
 export interface EvidenceBasedRoutingOptions {
   quality_weight?: number;
@@ -20,6 +26,17 @@ const DEFAULTS = {
   health_degraded_penalty: 0.2,
   health_unavailable_penalty: 1.0,
 };
+
+export interface StructuredScoringExplanation {
+  route_id: string;
+  total_score: number;
+  cost_score: number;
+  quality_score: number;
+  health_penalty: number;
+  task_family_used: string | null;
+  pricing_status: PricingStatus;
+  reasons: string[];
+}
 
 export class EvidenceBasedRouter {
   private readonly quality_weight: number;
@@ -41,15 +58,15 @@ export class EvidenceBasedRouter {
     policy: RoutingPolicy,
     qualityScores: Map<string, number>,
     healthStates: Map<string, HealthState>,
-    _taskFamily?: string
+    taskFamily?: string
   ): RoutingScore[] | null {
     switch (policy.ordering_strategy) {
       case 'cost':
-        return this.scoreByCost(routes, healthStates);
+        return this.scoreByCost(routes, healthStates, policy);
       case 'quality':
-        return this.scoreByQuality(routes, qualityScores, healthStates);
+        return this.scoreByQuality(routes, qualityScores, healthStates, taskFamily);
       case 'balanced':
-        return this.scoreBalanced(routes, qualityScores, healthStates);
+        return this.scoreBalanced(routes, qualityScores, healthStates, taskFamily, policy);
       case 'latency':
       case 'custom':
         return null;
@@ -60,9 +77,15 @@ export class EvidenceBasedRouter {
 
   private scoreByCost(
     routes: ModelRoute[],
-    healthStates: Map<string, HealthState>
-  ): RoutingScore[] {
+    healthStates: Map<string, HealthState>,
+    policy?: RoutingPolicy
+  ): RoutingScore[] | null {
     if (routes.length === 0) return [];
+
+    if (policy && !policy.allow_unknown_pricing) {
+      const hasUnknownPricing = routes.some((r) => r.pricing.pricing_status === 'unknown');
+      if (hasUnknownPricing) return [];
+    }
 
     const costs = routes.map(
       (r) => r.pricing.input_cost_per_1k_tokens + r.pricing.output_cost_per_1k_tokens
@@ -94,7 +117,8 @@ export class EvidenceBasedRouter {
   private scoreByQuality(
     routes: ModelRoute[],
     qualityScores: Map<string, number>,
-    healthStates: Map<string, HealthState>
+    healthStates: Map<string, HealthState>,
+    _taskFamily?: string
   ): RoutingScore[] | null {
     const hasAnyEvidence = routes.some((r) => qualityScores.has(r.route_id));
     if (!hasAnyEvidence) return null;
@@ -123,12 +147,15 @@ export class EvidenceBasedRouter {
   private scoreBalanced(
     routes: ModelRoute[],
     qualityScores: Map<string, number>,
-    healthStates: Map<string, HealthState>
+    healthStates: Map<string, HealthState>,
+    _taskFamily?: string,
+    policy?: RoutingPolicy
   ): RoutingScore[] | null {
     const hasAnyEvidence = routes.some((r) => qualityScores.has(r.route_id));
     if (!hasAnyEvidence) return null;
 
-    const costScores = this.scoreByCost(routes, healthStates);
+    const costScores = this.scoreByCost(routes, healthStates, policy);
+    if (!costScores) return null;
 
     return routes.map((route, i) => {
       const qualityScore = qualityScores.get(route.route_id) ?? 0;

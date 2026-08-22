@@ -41,6 +41,7 @@ function createTestRoute(
       currency: 'USD',
       units: 'per_1k_tokens',
       source: 'test-fixture',
+      pricing_status: 'known_paid',
       effective_at: new Date(),
       refreshed_at: new Date(),
       version: '1.0.0',

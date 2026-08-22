@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS "model_routes" (
   "pricing_effective_at" TEXT NOT NULL,
   "pricing_refreshed_at" TEXT NOT NULL,
   "pricing_version" TEXT NOT NULL,
+  "pricing_status" TEXT NOT NULL DEFAULT 'unknown',
   "availability_status" TEXT NOT NULL,
   "created_at" TEXT NOT NULL,
   "updated_at" TEXT NOT NULL

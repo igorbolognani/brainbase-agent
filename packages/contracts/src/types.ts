@@ -20,6 +20,7 @@ export type ExecutionStatus =
 export type VerificationOutcome = 'accepted' | 'retryable_failure' | 'terminal_failure';
 export type OrderingStrategy = 'cost' | 'quality' | 'latency' | 'balanced' | 'custom';
 export type OrderingStatus = 'operational' | 'unsupported';
+export type PricingStatus = 'known_free' | 'known_paid' | 'unknown';
 
 /**
  * Performance metadata for quality/latency ordering
@@ -184,6 +185,7 @@ export interface PricingInfo {
   currency: string; // e.g., 'USD'
   units: string; // e.g., 'per_1k_tokens'
   source: string; // Where this pricing came from (e.g., 'openai-api', 'openrouter-api', 'manual')
+  pricing_status: PricingStatus;
   effective_at: Date;
   refreshed_at: Date;
   version: string; // Version identifier for this pricing snapshot
@@ -243,6 +245,7 @@ export interface RoutingPolicy {
   ordering_strategy: OrderingStrategy;
   admissibility_rules: AdmissibilityRules;
   budget_constraints: BudgetConstraints;
+  allow_unknown_pricing?: boolean;
   retry_policy?: RetryPolicy;
   manual_override_allowed: boolean;
   version: number;

@@ -83,6 +83,7 @@ export interface PublicRouteProjection {
     currency: string;
     units: string;
     source: string;
+    pricing_status: import('@gptrouter/contracts').PricingStatus;
     effective_at: string;
     refreshed_at: string;
     version: string;
@@ -766,6 +767,7 @@ function createSyntheticRepositories(
       currency: 'USD',
       units: 'per_1k_tokens',
       source: 'synthetic-fixture',
+      pricing_status: 'known_free',
       effective_at: now,
       refreshed_at: now,
       version: 'synthetic-v1',
@@ -787,6 +789,7 @@ function createSyntheticRepositories(
       currency: 'USD',
       units: 'per_1k_tokens',
       source: 'synthetic-fixture',
+      pricing_status: 'known_paid',
       effective_at: now,
       refreshed_at: now,
       version: 'synthetic-v1',
@@ -868,7 +871,13 @@ function createSyntheticRepositories(
 }
 
 function estimateRouteCost(route: ModelRoute): number {
-  return route.pricing.input_cost_per_1k_tokens + route.pricing.output_cost_per_1k_tokens;
+  const inputCostPer1k = route.pricing.input_cost_per_1k_tokens;
+  const outputCostPer1k = route.pricing.output_cost_per_1k_tokens;
+  const defaultInputTokens = 1000;
+  const defaultOutputTokens = 500;
+  return (
+    (defaultInputTokens / 1000) * inputCostPer1k + (defaultOutputTokens / 1000) * outputCostPer1k
+  );
 }
 
 function startOfDay(value: Date): Date {
@@ -906,6 +915,7 @@ function toPublicRoute(route: ModelRoute): PublicRouteProjection {
       currency: route.pricing.currency,
       units: route.pricing.units,
       source: route.pricing.source,
+      pricing_status: route.pricing.pricing_status,
       effective_at: route.pricing.effective_at.toISOString(),
       refreshed_at: route.pricing.refreshed_at.toISOString(),
       version: route.pricing.version,

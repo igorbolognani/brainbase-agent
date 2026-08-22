@@ -17,6 +17,7 @@ import type {
   RoutePerformanceMetadata,
   Connection,
   HealthState,
+  ModelOffering,
 } from '@gptrouter/contracts';
 import { generateId } from './utils.js';
 import { EvidenceBasedRouter, rankByScore } from './routing-scoring.js';
@@ -32,6 +33,7 @@ export interface RoutingEngineDependencies {
   getConnection?: (connection_id: string) => Promise<Connection | null>;
   getQualityScores?: (route_ids: string[]) => Promise<Map<string, number>>;
   getHealthStates?: (connection_ids: string[]) => Promise<Map<string, HealthState>>;
+  getOffering?: (provider: string, model_id: string) => Promise<ModelOffering | null>;
 }
 
 export class RoutingEngine {
@@ -106,8 +108,51 @@ export class RoutingEngine {
       details?: string;
     }>
   > {
+    const healthStates = this.deps.getHealthStates
+      ? await this.deps.getHealthStates([...new Set(routes.map((r) => r.connection_id))])
+      : new Map<string, HealthState>();
+
     return await Promise.all(
       routes.map(async (route) => {
+        if (route.connection_id) {
+          const healthState = healthStates.get(route.connection_id);
+          if (healthState === 'disabled' || healthState === 'unavailable') {
+            return {
+              route,
+              admissible: false,
+              reason_code: 'unavailable' as const,
+              details: `Connection health is ${healthState}`,
+            };
+          }
+        }
+
+        if (!route.connection_id) {
+          return {
+            route,
+            admissible: false,
+            reason_code: 'unavailable' as const,
+            details: 'Route has no connection_id',
+          };
+        }
+
+        if (this.deps.getOffering && route.source_provider && route.source_id) {
+          const offering = await this.deps.getOffering(route.source_provider, route.source_id);
+          if (offering) {
+            const offeringCapSet = new Set(offering.capabilities);
+            const missingCaps = task.requirements.capabilities.filter(
+              (cap) => !offeringCapSet.has(cap)
+            );
+            if (missingCaps.length > 0) {
+              return {
+                route,
+                admissible: false,
+                reason_code: 'insufficient_capability' as const,
+                details: `Model offering lacks required capabilities: ${missingCaps.join(', ')}`,
+              };
+            }
+          }
+        }
+
         if (!this.hasRequiredCapabilities(route, task.requirements.capabilities)) {
           return {
             route,
@@ -304,6 +349,10 @@ export class RoutingEngine {
 
     switch (policy.ordering_strategy) {
       case 'cost': {
+        if (!policy.allow_unknown_pricing) {
+          const hasUnknownPricing = routes.some((r) => r.pricing.pricing_status === 'unknown');
+          if (hasUnknownPricing) return [];
+        }
         const routesCopy = [...routes];
         return routesCopy.sort(
           (a, b) => this.deps.estimateCost(a, task) - this.deps.estimateCost(b, task)

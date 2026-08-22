@@ -45,6 +45,7 @@ function price() {
     currency: 'USD',
     units: 'per_1k_tokens',
     source: 'synthetic',
+    pricing_status: 'known_free' as const,
     effective_at: NOW,
     refreshed_at: NOW,
     version: 'test',

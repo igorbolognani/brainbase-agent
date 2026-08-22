@@ -2,6 +2,9 @@ import type {
   AccountMembership,
   AuthorizedExecutionContext,
   ExecutionAttempt,
+  HealthState,
+  ModelOffering,
+  ModelQualityEvidence,
   ModelRoute,
   RoutingDecision,
   Task,
@@ -67,6 +70,8 @@ export interface ProductionRepositories extends ExecutionCoordinatorRepositories
   executions: import('@gptrouter/contracts').ExecutionRepository;
   usage: import('@gptrouter/contracts').UsageRepository;
   audit: import('@gptrouter/contracts').AuditRepository;
+  modelOfferings: import('@gptrouter/contracts').ModelOfferingRepository;
+  modelEvidence: import('@gptrouter/contracts').ModelEvidenceRepository;
 }
 
 function clone<T>(value: T): T {
@@ -95,6 +100,7 @@ function routeProjection(route: ModelRoute): PublicRouteProjection {
       currency: route.pricing.currency,
       units: route.pricing.units,
       source: route.pricing.source,
+      pricing_status: route.pricing.pricing_status,
       effective_at: route.pricing.effective_at.toISOString(),
       refreshed_at: route.pricing.refreshed_at.toISOString(),
       version: route.pricing.version,
@@ -151,7 +157,89 @@ function startOfRange(value: Date, range: 'today' | 'week' | 'month'): Date {
 }
 
 function estimateRouteCost(route: ModelRoute): number {
-  return route.pricing.input_cost_per_1k_tokens + route.pricing.output_cost_per_1k_tokens;
+  const inputCostPer1k = route.pricing.input_cost_per_1k_tokens;
+  const outputCostPer1k = route.pricing.output_cost_per_1k_tokens;
+  const defaultInputTokens = 1000;
+  const defaultOutputTokens = 500;
+  return (
+    (defaultInputTokens / 1000) * inputCostPer1k + (defaultOutputTokens / 1000) * outputCostPer1k
+  );
+}
+
+async function getOfferingForRoute(
+  repos: ProductionRepositories,
+  provider: string,
+  modelId: string
+): Promise<ModelOffering | null> {
+  const offerings = await repos.modelOfferings.listOfferings({ provider });
+  return offerings.find((o) => o.model_id === modelId) ?? null;
+}
+
+function normalizeScore(evidence: ModelQualityEvidence): number {
+  const raw = evidence.higher_is_better ? evidence.score : 1 - evidence.score;
+  const scaleMax = parseFloat(evidence.score_scale);
+  if (!Number.isFinite(scaleMax) || scaleMax <= 0) return raw;
+  return raw / scaleMax;
+}
+
+async function buildQualityScores(
+  repos: ProductionRepositories,
+  routeIds: string[],
+  taskFamily?: string
+): Promise<Map<string, number>> {
+  const scores = new Map<string, number>();
+  for (const routeId of routeIds) {
+    const route = await repos.routes.getRoute(routeId);
+    if (!route || !route.source_provider || !route.source_id) continue;
+    const offering = await getOfferingForRoute(repos, route.source_provider, route.source_id);
+    if (!offering) continue;
+    const evidence = await repos.modelEvidence.listEvidenceForModel(
+      route.source_provider,
+      route.source_id
+    );
+    if (evidence.length === 0) continue;
+    const family = taskFamily ?? 'general';
+    const filtered = evidence.filter((e) => e.task_family === family);
+    const evidenceToUse = filtered.length > 0 ? filtered : evidence;
+    const weights = evidenceToUse.map((e) => e.confidence);
+    const totalWeight = weights.reduce((sum, w) => sum + w, 0);
+    if (totalWeight <= 0) continue;
+    let weighted = 0;
+    for (let i = 0; i < evidenceToUse.length; i++) {
+      weighted += normalizeScore(evidenceToUse[i]) * (weights[i] / totalWeight);
+    }
+    scores.set(routeId, weighted);
+  }
+  return scores;
+}
+
+async function buildHealthStates(
+  repos: ProductionRepositories,
+  connectionIds: string[]
+): Promise<Map<string, HealthState>> {
+  const healthStates = new Map<string, HealthState>();
+  for (const connectionId of connectionIds) {
+    const connection = await repos.connections.getConnection(connectionId);
+    if (!connection) {
+      healthStates.set(connectionId, 'unavailable');
+      continue;
+    }
+    switch (connection.status) {
+      case 'active':
+        healthStates.set(connectionId, 'healthy');
+        break;
+      case 'error':
+        healthStates.set(connectionId, 'unavailable');
+        break;
+      case 'revoked':
+      case 'expired':
+        healthStates.set(connectionId, 'disabled');
+        break;
+      default:
+        healthStates.set(connectionId, 'healthy');
+    }
+  }
+  return healthStates;
 }
 
 export function createProductionGPTRouterApplication(
@@ -165,6 +253,9 @@ export function createProductionGPTRouterApplication(
       budgetEnforcer.checkBudget(accountId, estimatedCost, policy),
     estimateCost: (route) => estimateRouteCost(route),
     getConnection: (connectionId) => repositories.connections.getConnection(connectionId),
+    getQualityScores: (routeIds) => buildQualityScores(repositories, routeIds),
+    getHealthStates: (connectionIds) => buildHealthStates(repositories, connectionIds),
+    getOffering: (provider, modelId) => getOfferingForRoute(repositories, provider, modelId),
   });
 
   let auditFailureCount = 0;

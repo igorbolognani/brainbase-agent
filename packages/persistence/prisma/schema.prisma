@@ -125,6 +125,7 @@ model ModelRoute {
   pricing_effective_at   DateTime
   pricing_refreshed_at   DateTime
   pricing_version        String
+  pricing_status         String   @default("unknown")
   availability_status    String // 'available' | 'unavailable' | 'degraded'
   created_at             DateTime @default(now())
   updated_at             DateTime @default(now())
@@ -355,6 +356,7 @@ model ModelOffering {
   pricing_effective_at     DateTime
   pricing_refreshed_at     DateTime
   pricing_version          String
+  pricing_status           String   @default("unknown")
   availability_status      String   @default("available")
   health_state             String   @default("healthy")
   effective_at             DateTime @default(now())

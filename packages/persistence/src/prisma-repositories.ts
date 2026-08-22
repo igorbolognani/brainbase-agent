@@ -162,6 +162,7 @@ function rowToRoute(row: {
   pricing_effective_at: Date;
   pricing_refreshed_at: Date;
   pricing_version: string;
+  pricing_status: string | null;
   availability_status: string;
   created_at: Date;
   updated_at: Date;
@@ -182,6 +183,7 @@ function rowToRoute(row: {
       currency: row.pricing_currency,
       units: row.pricing_units,
       source: row.pricing_source,
+      pricing_status: (row.pricing_status as 'known_free' | 'known_paid' | 'unknown') ?? 'unknown',
       effective_at: row.pricing_effective_at,
       refreshed_at: row.pricing_refreshed_at,
       version: row.pricing_version,
@@ -405,6 +407,7 @@ function rowToModelOffering(row: {
   pricing_effective_at: Date;
   pricing_refreshed_at: Date;
   pricing_version: string;
+  pricing_status: string | null;
   availability_status: string;
   health_state: string;
   effective_at: Date;
@@ -432,6 +435,7 @@ function rowToModelOffering(row: {
       currency: row.pricing_currency,
       units: row.pricing_units,
       source: row.pricing_source,
+      pricing_status: (row.pricing_status as 'known_free' | 'known_paid' | 'unknown') ?? 'unknown',
       effective_at: row.pricing_effective_at,
       refreshed_at: row.pricing_refreshed_at,
       version: row.pricing_version,
@@ -1158,6 +1162,7 @@ export class PrismaModelOfferingRepository implements ModelOfferingRepository {
         pricing_effective_at: offering.pricing.effective_at,
         pricing_refreshed_at: offering.pricing.refreshed_at,
         pricing_version: offering.pricing.version,
+        pricing_status: offering.pricing.pricing_status,
         availability_status: offering.availability_status,
         health_state: offering.health_state,
         version: offering.version,
@@ -1182,6 +1187,7 @@ export class PrismaModelOfferingRepository implements ModelOfferingRepository {
         pricing_effective_at: offering.pricing.effective_at,
         pricing_refreshed_at: offering.pricing.refreshed_at,
         pricing_version: offering.pricing.version,
+        pricing_status: offering.pricing.pricing_status,
         availability_status: offering.availability_status,
         health_state: offering.health_state,
         version: offering.version,

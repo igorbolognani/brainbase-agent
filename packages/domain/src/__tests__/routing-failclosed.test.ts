@@ -46,6 +46,7 @@ describe('RoutingEngine Fail-Closed Behavior', () => {
       currency: 'USD',
       units: 'per_1k_tokens',
       source: 'manual',
+      pricing_status: 'known_paid',
       effective_at: new Date(),
       refreshed_at: new Date(),
       version: '1.0',

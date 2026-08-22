@@ -98,6 +98,7 @@ function harness(
         currency: 'USD',
         units: 'per_1k_tokens',
         source: 'synthetic-fixture',
+        pricing_status: 'known_paid',
         effective_at: now,
         refreshed_at: now,
         version: 'synthetic-v1',
