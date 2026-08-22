@@ -408,8 +408,9 @@ model OrchestrationGraph {
   task_id       String
   mode          String   // 'single' | 'fallback' | 'parallel_candidates' | 'planner_worker_reviewer'
   status        String   @default("pending")
-  max_nodes     Int      @default(10)
-  max_parallel  Int      @default(4)
+  limits        Json     @default("{}") // OrchestrationLimits
+  max_nodes     Int      @default(10) // deprecated, use limits
+  max_parallel  Int      @default(4) // deprecated, use limits
   created_at    DateTime @default(now())
   updated_at    DateTime @default(now())
 

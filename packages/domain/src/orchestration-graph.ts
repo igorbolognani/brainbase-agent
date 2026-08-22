@@ -3,15 +3,17 @@ import type {
   OrchestrationNode,
   OrchestrationMode,
   OrchestrationNodeRole,
+  OrchestrationGraphStatus,
+  OrchestrationLimits,
 } from '@gptrouter/contracts';
+import { DEFAULT_ORCHESTRATION_LIMITS } from '@gptrouter/contracts';
 
 export type CreateGraphInput = {
   execution_id: string;
   account_id: string;
   task_id: string;
   mode: OrchestrationMode;
-  max_nodes?: number;
-  max_parallel?: number;
+  limits?: Partial<OrchestrationLimits>;
 };
 
 export type AddNodeInput = {
@@ -21,12 +23,20 @@ export type AddNodeInput = {
   decision_id?: string;
 };
 
+export type BuildResult = {
+  graph: OrchestrationGraph;
+  nodes: OrchestrationNode[];
+};
+
 export class OrchestrationGraphBuilder {
   private graph: OrchestrationGraph;
   private nodes: OrchestrationNode[] = [];
-  private nodeCount = 0;
 
   constructor(input: CreateGraphInput) {
+    const limits: OrchestrationLimits = {
+      ...DEFAULT_ORCHESTRATION_LIMITS,
+      ...input.limits,
+    };
     this.graph = {
       graph_id: `graph-${randomId()}`,
       execution_id: input.execution_id,
@@ -34,8 +44,7 @@ export class OrchestrationGraphBuilder {
       task_id: input.task_id,
       mode: input.mode,
       status: 'pending',
-      max_nodes: input.max_nodes ?? 10,
-      max_parallel: input.max_parallel ?? 4,
+      limits,
       created_at: new Date(),
       updated_at: new Date(),
     };
@@ -57,7 +66,6 @@ export class OrchestrationGraphBuilder {
       case 'fallback':
         this.addNode({ role: 'root' });
         this.addNode({ role: 'worker', parent_node_id: this.nodes[0].node_id });
-        this.addNode({ role: 'worker', parent_node_id: this.nodes[0].node_id });
         break;
       case 'parallel_candidates':
         this.addNode({ role: 'root' });
@@ -76,8 +84,8 @@ export class OrchestrationGraphBuilder {
   }
 
   addNode(input: AddNodeInput): OrchestrationNode {
-    if (this.nodeCount >= this.graph.max_nodes) {
-      throw new Error(`Node limit ${this.graph.max_nodes} reached`);
+    if (this.nodes.length >= this.graph.limits.max_nodes) {
+      throw new Error(`Node limit ${this.graph.limits.max_nodes} reached`);
     }
 
     const sort_order = input.parent_node_id
@@ -98,7 +106,6 @@ export class OrchestrationGraphBuilder {
     };
 
     this.nodes.push(node);
-    this.nodeCount++;
     return node;
   }
 
@@ -131,27 +138,44 @@ export class OrchestrationGraphBuilder {
     this.graph.updated_at = new Date();
   }
 
+  updateGraphStatus(status: OrchestrationGraphStatus): void {
+    this.graph.status = status;
+    this.graph.updated_at = new Date();
+  }
+
   getParallelSlots(): number {
     const running = this.nodes.filter((n) => n.status === 'running').length;
-    return Math.max(0, this.graph.max_parallel - running);
+    return Math.max(0, this.graph.limits.max_parallel - running);
   }
 
   isComplete(): boolean {
-    return this.nodes.every((n) => n.status === 'completed' || n.status === 'failed');
+    return this.nodes.every(
+      (n) =>
+        n.status === 'completed' ||
+        n.status === 'failed' ||
+        n.status === 'cancelled' ||
+        n.status === 'skipped'
+    );
   }
 
   hasFailed(): boolean {
     return this.nodes.some((n) => n.status === 'failed');
   }
 
-  markComplete(): void {
-    this.graph.status = 'completed';
-    this.graph.updated_at = new Date();
+  hasActiveNodes(): boolean {
+    return this.nodes.some((n) => n.status === 'running' || n.status === 'retrying');
   }
 
-  markFailed(): void {
-    this.graph.status = 'failed';
-    this.graph.updated_at = new Date();
+  getStageCount(): number {
+    const completed = this.nodes.filter((n) => n.status === 'completed');
+    return completed.length;
+  }
+
+  toBuildResult(): BuildResult {
+    return {
+      graph: { ...this.graph },
+      nodes: this.nodes.map((n) => ({ ...n })),
+    };
   }
 }
 

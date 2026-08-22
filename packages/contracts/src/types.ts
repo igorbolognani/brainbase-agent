@@ -486,7 +486,32 @@ export type OrchestrationMode =
 export type OrchestrationNodeRole =
   'root' | 'worker' | 'planner' | 'reviewer' | 'judge' | 'candidate';
 export type OrchestrationNodeStatus =
-  'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'skipped';
+  'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'retrying' | 'skipped';
+
+export type OrchestrationGraphStatus =
+  'pending' | 'running' | 'completed' | 'failed' | 'partial' | 'cancel_requested' | 'cancelled';
+
+export interface OrchestrationLimits {
+  max_nodes: number;
+  max_parallel: number;
+  max_stages: number;
+  max_retries_per_node: number;
+  max_fallbacks: number;
+  max_total_estimated_cost: number;
+  max_total_runtime_ms: number;
+  node_timeout_ms: number;
+}
+
+export const DEFAULT_ORCHESTRATION_LIMITS: OrchestrationLimits = {
+  max_nodes: 10,
+  max_parallel: 4,
+  max_stages: 5,
+  max_retries_per_node: 2,
+  max_fallbacks: 2,
+  max_total_estimated_cost: 10.0,
+  max_total_runtime_ms: 300_000,
+  node_timeout_ms: 60_000,
+};
 
 export interface OrchestrationGraph {
   graph_id: string;
@@ -494,9 +519,8 @@ export interface OrchestrationGraph {
   account_id: string;
   task_id: string;
   mode: OrchestrationMode;
-  status: OrchestrationNodeStatus;
-  max_nodes: number;
-  max_parallel: number;
+  status: OrchestrationGraphStatus;
+  limits: OrchestrationLimits;
   created_at: Date;
   updated_at: Date;
 }

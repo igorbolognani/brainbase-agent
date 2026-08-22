@@ -493,11 +493,25 @@ function rowToOrchestrationGraph(row: {
   task_id: string;
   mode: string;
   status: string;
+  limits: unknown;
   max_nodes: number;
   max_parallel: number;
   created_at: Date;
   updated_at: Date;
 }): OrchestrationGraph {
+  const limits =
+    typeof row.limits === 'object' && row.limits !== null
+      ? (row.limits as OrchestrationGraph['limits'])
+      : {
+          max_nodes: row.max_nodes ?? 10,
+          max_parallel: row.max_parallel ?? 4,
+          max_stages: 5,
+          max_retries_per_node: 2,
+          max_fallbacks: 2,
+          max_total_estimated_cost: 10,
+          max_total_runtime_ms: 300_000,
+          node_timeout_ms: 60_000,
+        };
   return {
     graph_id: row.graph_id,
     execution_id: row.execution_id,
@@ -505,8 +519,7 @@ function rowToOrchestrationGraph(row: {
     task_id: row.task_id,
     mode: row.mode as OrchestrationGraph['mode'],
     status: row.status as OrchestrationGraph['status'],
-    max_nodes: row.max_nodes,
-    max_parallel: row.max_parallel,
+    limits,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
@@ -1305,8 +1318,9 @@ export class PrismaOrchestrationGraphRepository implements OrchestrationGraphRep
         task_id: graph.task_id,
         mode: graph.mode,
         status: graph.status,
-        max_nodes: graph.max_nodes,
-        max_parallel: graph.max_parallel,
+        limits: JSON.parse(JSON.stringify(graph.limits)) as Prisma.InputJsonValue,
+        max_nodes: graph.limits.max_nodes,
+        max_parallel: graph.limits.max_parallel,
       },
     });
     return rowToOrchestrationGraph(row);

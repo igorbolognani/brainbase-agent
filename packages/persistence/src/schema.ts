@@ -381,6 +381,7 @@ export const orchestration_graphs = sqliteTable(
       .references(() => tasks.task_id),
     mode: text('mode').notNull(),
     status: text('status').notNull().default('pending'),
+    limits: text('limits').notNull().default('{}'),
     max_nodes: integer('max_nodes').notNull().default(10),
     max_parallel: integer('max_parallel').notNull().default(4),
     created_at: text('created_at').notNull(),
